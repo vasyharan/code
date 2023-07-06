@@ -1,24 +1,31 @@
 const std = @import("std");
 
+const Editor = @import("./editor.zig").Editor;
+
+var termios: ?std.os.termios = null;
+
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var args = std.process.args();
+    _ = args.next(); // ignore self
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator = gpa.allocator();
+    defer _ = gpa.deinit();
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    var editor = try Editor.init(allocator);
+    defer editor.deinit();
 
-    try bw.flush(); // don't forget to flush!
+    termios = try Editor.enableRawMode();
+    if (args.next()) |path| {
+        try editor.open(path);
+    }
+
+    try editor.run();
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+    if (termios) |t| {
+        try Editor.disableRawMode(t);
+    }
+    std.builtin.default_panic(msg, error_return_trace, ret_addr);
 }
