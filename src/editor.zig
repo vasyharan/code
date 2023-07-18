@@ -1,7 +1,8 @@
 const std = @import("std");
+const ts = @import("./treesitter.zig");
 
 const ScreenSize = struct { rows: u16, cols: u16 };
-const Position = struct { x: u16 = 0, y: u16 = 0 };
+const Position = struct { x: u32 = 0, y: u32 = 0 };
 
 const KeyType = enum { normal, escape_seq };
 const KeyEscapeSeq = enum {
@@ -15,10 +16,22 @@ const Key = union(KeyType) {
     escape_seq: KeyEscapeSeq,
 };
 
-const Row = struct {
-    src: []u8,
+const HighlightColour = [3]u8;
+const HighlightStyle = struct {
+    name: []const u8,
+    fg: HighlightColour,
+    bg: HighlightColour,
 };
-const Buffer = std.ArrayList(Row);
+const Highlight = struct {
+    start: Position,
+    end: Position,
+    style: HighlightStyle,
+};
+const Row = []u8;
+const Buffer = struct {
+    rows: std.ArrayList(Row),
+    highlights: std.ArrayList(Highlight),
+};
 
 const EditorAction = enum {
     unknown,
@@ -34,6 +47,7 @@ const EditorAction = enum {
 const EditorError = error{
     SetParam,
     GetWindowSize,
+    TSParserError,
 };
 
 pub const Editor = struct {
@@ -45,6 +59,7 @@ pub const Editor = struct {
     stdin: std.fs.File = undefined,
     // stdout: std.fs.File = undefined,
     stdout: std.io.BufferedWriter(4096, std.fs.File.Writer) = undefined,
+    log: std.fs.File = undefined,
 
     cursor: Position = Position{},
     offset: Position = Position{},
@@ -52,25 +67,37 @@ pub const Editor = struct {
 
     buffer: Buffer,
 
+    ts_parser: ts.Parser = undefined,
+
     pub fn init(allocator: std.mem.Allocator) !Self {
         return Self{
             .allocator = allocator,
             .stdin = std.io.getStdIn(),
             .stdout = std.io.bufferedWriter(std.io.getStdOut().writer()),
             // .stdout = std.io.getStdOut(),
+            .log = std.io.getStdErr(),
             .size = try Self.getWindowSize(),
-            .buffer = Buffer.init(allocator),
+            .buffer = Buffer{
+                .rows = std.ArrayList(Row).init(allocator),
+                .highlights = std.ArrayList(Highlight).init(allocator),
+            },
+            .ts_parser = try ts.Parser.init(allocator),
+            .cursor = Position{ .y = 100 },
         };
     }
 
     pub fn deinit(self: *Self) void {
-        // self.disableRawMode() catch unreachable;
         self.clearScreen() catch unreachable;
+        self.ts_parser.deinit();
 
-        for (self.buffer.items) |row| {
-            self.allocator.free(row.src);
+        for (self.buffer.rows.items) |row| {
+            self.allocator.free(row);
         }
-        self.buffer.deinit();
+        self.buffer.rows.deinit();
+        for (self.buffer.highlights.items) |hl| {
+            self.allocator.free(hl.style.name);
+        }
+        self.buffer.highlights.deinit();
     }
 
     pub fn enableRawMode() !std.os.termios {
@@ -99,13 +126,49 @@ pub const Editor = struct {
 
         var contents = try file.reader().readAllAlloc(self.allocator, std.math.maxInt(u32));
         defer self.allocator.free(contents);
-        var it = std.mem.splitSequence(u8, contents, "\n");
 
+        var it = std.mem.splitSequence(u8, contents, "\n");
         while (it.next()) |line| {
-            var row = Row{
-                .src = try self.allocator.dupe(u8, line),
-            };
-            try self.buffer.append(row);
+            var dupe = try self.allocator.dupe(u8, line);
+            try self.buffer.rows.append(dupe);
+        }
+
+        try self.ts_parser.setLanguage(ts.langZig());
+        var ts_tree = try self.ts_parser.parseString(contents);
+        defer ts_tree.deinit();
+
+        const ts_query_source = @embedFile("tree-sitter/queries/zig/highlights.scm");
+        var ts_query = try ts.Query.init(ts.langZig(), ts_query_source);
+        defer ts_query.deinit();
+        var ts_query_cursor = ts.QueryCursor.init();
+        defer ts_query_cursor.deinit();
+
+        ts_query_cursor.exec(ts_query, ts_tree.rootNode());
+        while (ts_query_cursor.nextMatch()) |match| {
+            for (0..match.captureCount()) |i| {
+                if (match.capture(@intCast(i))) |capture| {
+                    var tmp = capture.node();
+                    var start = tmp.startPoint();
+                    var end = tmp.endPoint();
+                    const hl = Highlight{
+                        .start = Position{ .y = start.row, .x = start.column },
+                        .end = Position{ .y = end.row, .x = end.column },
+                        .style = self.mapHighlight(capture.name(ts_query)),
+                    };
+                    //if (std.mem.eql(u8, "keyword", capture.name(ts_query))) {
+                    // std.log.debug("capture={s}, name={s}, fg={any}, start={}/{}, end={}/{}", .{
+                    //     capture.name(ts_query),
+                    //     hl.style.name,
+                    //     hl.style.fg,
+                    //     hl.start.y,
+                    //     hl.start.x,
+                    //     hl.end.y,
+                    //     hl.end.x,
+                    // });
+                    try self.buffer.highlights.append(hl);
+                    //}
+                }
+            }
         }
     }
 
@@ -208,19 +271,84 @@ pub const Editor = struct {
     }
 
     fn drawRows(self: *Self) !void {
+        const fg_reset = HighlightColour{ 253, 244, 193 };
+        var fg = fg_reset;
+        var hl_index: u32 = 0;
+        while (hl_index < self.buffer.highlights.items.len and self.buffer.highlights.items[hl_index].start.y < self.offset.y) {
+            const hl = self.buffer.highlights.items[hl_index];
+            fg = hl.style.fg;
+            hl_index += 1;
+        }
         for (0..(self.size.rows)) |numrow| {
             const bufrow = numrow + self.offset.y;
-            var line: []const u8 = undefined;
-            if (self.buffer.items.len > bufrow) {
-                line = self.buffer.items[bufrow].src;
+            if (self.buffer.rows.items.len > bufrow) {
+                var line = self.buffer.rows.items[bufrow];
                 const start = @min(line.len, self.offset.x);
                 const end = @min(line.len, start + self.size.cols);
-                line = line[start..end];
+
+                var curr_x = start;
+                var maybe_hl: ?Highlight = if (hl_index < self.buffer.highlights.items.len) self.buffer.highlights.items[hl_index] else null;
+                while (maybe_hl) |hl| {
+                    if (hl.start.y > bufrow) {
+                        break;
+                    }
+                    if (curr_x >= end) {
+                        break;
+                    }
+                    if (hl.start.x > curr_x) {
+                        const next_x = hl.start.x;
+                        try self.draw(line[curr_x..next_x]);
+                        curr_x = next_x;
+                    }
+                    if (hl.start.x <= curr_x) {
+                        // start highlight
+                        // try self.draw("\x1b[31m");
+                        fg = hl.style.fg;
+                        var buf: [32]u8 = [_]u8{0} ** 32;
+                        var fmtted = try std.fmt.bufPrint(&buf, "\x1b[38;2;{d};{d};{d}m", .{ fg[0], fg[1], fg[2] });
+                        try self.draw(fmtted);
+                    }
+                    var next_x = end;
+                    hl_index += 1;
+                    maybe_hl = if (hl_index < self.buffer.highlights.items.len) self.buffer.highlights.items[hl_index] else null;
+                    if (hl.end.y == bufrow) {
+                        if (maybe_hl) |next_hl| {
+                            if (next_hl.start.y == bufrow) {
+                                next_x = @min(end, next_hl.start.x);
+                            } else {
+                                next_x = @min(end, hl.end.x);
+                            }
+                        } else {
+                            next_x = @min(end, hl.end.x);
+                        }
+                    } else {
+                        next_x = end;
+                    }
+                    // if (bufrow == 126) {
+                    //     std.log.debug("{s}, {} {} {} {} {}/{} {}/{}", .{
+                    //         hl.style.name,
+                    //         start,
+                    //         end,
+                    //         curr_x,
+                    //         next_x,
+                    //         hl.start.y,
+                    //         hl.start.x,
+                    //         hl.end.y,
+                    //         hl.end.x,
+                    //     });
+                    // }
+                    try self.draw(line[curr_x..next_x]);
+
+                    // end highlight
+                    try self.draw("\x1b[39m");
+                    fg = fg_reset;
+                    curr_x = next_x;
+                }
+                try self.draw(line[curr_x..end]);
             } else {
-                line = "~";
+                try self.draw("~");
             }
 
-            try self.draw(line);
             try self.draw("\x1b[K");
             try self.draw("\r\n");
         }
@@ -241,7 +369,7 @@ pub const Editor = struct {
                 .cursor_up => if (self.cursor.y > 0) {
                     self.cursor.y -= 1;
                 },
-                .cursor_down => if (self.cursor.y < self.buffer.items.len - 1) {
+                .cursor_down => if (self.buffer.rows.items.len > 0 and self.cursor.y < self.buffer.rows.items.len - 1) {
                     self.cursor.y += 1;
                 },
                 .cursor_right => self.cursor.x += 1,
@@ -273,5 +401,80 @@ pub const Editor = struct {
 
     fn cntrlkey(c: u8) u8 {
         return c & 0x1f;
+    }
+
+    fn mapHighlight(self: Self, capture: []const u8) HighlightStyle {
+        const red = HighlightColour{ 251, 73, 52 };
+        const green = HighlightColour{ 184, 187, 38 };
+        const yellow = HighlightColour{ 250, 189, 47 };
+        const blue = HighlightColour{ 131, 165, 152 };
+        const purple = HighlightColour{ 211, 134, 155 };
+        const aqua = HighlightColour{ 142, 192, 124 };
+        const orange = HighlightColour{ 254, 128, 25 };
+
+        if (std.mem.eql(u8, "keyword", capture))
+            return HighlightStyle{
+                .name = self.allocator.dupe(u8, capture) catch unreachable,
+                .fg = red,
+                .bg = HighlightColour{ 40, 40, 40 },
+            }
+        else if (std.mem.eql(u8, "variable", capture))
+            return HighlightStyle{
+                .name = self.allocator.dupe(u8, capture) catch unreachable,
+                .fg = green,
+                .bg = HighlightColour{ 40, 40, 40 },
+            }
+        else if (std.mem.eql(u8, "type", capture))
+            return HighlightStyle{
+                .name = self.allocator.dupe(u8, capture) catch unreachable,
+                .fg = yellow,
+                .bg = HighlightColour{ 40, 40, 40 },
+            }
+        else if (std.mem.eql(u8, "function", capture))
+            return HighlightStyle{
+                .name = self.allocator.dupe(u8, capture) catch unreachable,
+                .fg = blue,
+                .bg = HighlightColour{ 40, 40, 40 },
+            }
+        else if (std.mem.eql(u8, "constant", capture))
+            return HighlightStyle{
+                .name = self.allocator.dupe(u8, capture) catch unreachable,
+                .fg = purple,
+                .bg = HighlightColour{ 40, 40, 40 },
+            }
+        else if (std.mem.eql(u8, "field", capture))
+            return HighlightStyle{
+                .name = self.allocator.dupe(u8, capture) catch unreachable,
+                .fg = aqua,
+                .bg = HighlightColour{ 40, 40, 40 },
+            }
+        else if (std.mem.eql(u8, "punctuation", capture))
+            return HighlightStyle{
+                .name = self.allocator.dupe(u8, capture) catch unreachable,
+                .fg = orange,
+                .bg = HighlightColour{ 40, 40, 40 },
+            }
+        else if (std.mem.eql(u8, "string", capture))
+            return HighlightStyle{
+                .name = self.allocator.dupe(u8, capture) catch unreachable,
+                .fg = yellow,
+                .bg = HighlightColour{ 40, 40, 40 },
+            }
+        else if (std.mem.eql(u8, "string.escape", capture))
+            return HighlightStyle{
+                .name = self.allocator.dupe(u8, capture) catch unreachable,
+                .fg = red,
+                .bg = HighlightColour{ 40, 40, 40 },
+            }
+        else
+            return HighlightStyle{
+                .name = self.allocator.dupe(u8, capture) catch unreachable,
+                .fg = HighlightColour{ 253, 244, 193 },
+                .bg = HighlightColour{ 40, 40, 40 },
+            };
+    }
+
+    fn log(self: *Self, bytes: []const u8) !void {
+        _ = try self.log.write(bytes);
     }
 };

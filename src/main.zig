@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const ts = @import("./treesitter.zig");
 const Editor = @import("./editor.zig").Editor;
 
 var termios: ?std.os.termios = null;
@@ -12,10 +13,13 @@ pub fn main() !void {
     var allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
+    ts.init();
     var editor = try Editor.init(allocator);
     defer editor.deinit();
 
     termios = try Editor.enableRawMode();
+    defer Editor.disableRawMode(termios.?) catch unreachable;
+
     if (args.next()) |path| {
         try editor.open(path);
     }

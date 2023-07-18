@@ -1,6 +1,10 @@
 .devenv/
 .direnv/
 
+# build artifacts
+/dep/
+/src/tree-sitter/queries/
+
 # zig
-zig-out/
-zig-cache/
+/zig-out/
+/zig-cache/
