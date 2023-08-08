@@ -59,12 +59,15 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // const exe_tests = b.addTest("src/main.zig");
-    // exe_tests.setTarget(target);
-    // exe_tests.setBuildMode(mode);
+    const rope_tests = b.addTest(.{
+        .name = "rope",
+        .root_source_file = std.build.FileSource.relative("src/rope.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
-    // const test_step = b.step("test", "Run unit tests");
-    // test_step.dependOn(&exe_tests.step);
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&rope_tests.step);
 }
 
 const MyBuildStep = struct {
