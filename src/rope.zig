@@ -89,8 +89,8 @@ const BranchNode = struct {
         self.right = right;
         self.node = Node{
             .allocator = allocator,
-            .node_type = NodeType.branch,
-            .parent_and_colour = @intFromEnum(Colour.red),
+            .node_type = .branch,
+            .parent_and_colour = @intFromEnum(Colour.black),
             .len = len,
             .ref_count = 0,
         };
@@ -249,6 +249,38 @@ const Rope = struct {
         return Cursor.init(self.*);
     }
 
+    fn isBalanced(self: *const Self) bool {
+        if (self.root.isLeaf()) {
+            return true;
+        } else {
+            const black_depth: usize = if (self.root.getColor() == .black) 1 else 0;
+            return isNodeBalanced(self.root, black_depth).balanced;
+        }
+    }
+
+    fn isNodeBalanced(maybe_node: ?*Node, black_depth: usize) struct { balanced: bool, black_height: usize = 0 } {
+        const unbalanced = .{ .balanced = false };
+        if (maybe_node == null or (maybe_node orelse unreachable).isLeaf()) {
+            return .{ .balanced = true, .black_height = black_depth };
+        }
+
+        const node: *Node = maybe_node orelse unreachable;
+        const branch = BranchNode.fromNode(node);
+        if (branch.node.getColor() == .red) {
+            if (branch.left) |left| if (left.getColor() == .red) return unbalanced;
+            if (branch.right) |right| if (right.getColor() == .red) return unbalanced;
+        }
+
+        const black_depth_delta: usize = if (node.getColor() == .black) 1 else 0;
+        const left_result = isNodeBalanced(branch.left, black_depth + black_depth_delta);
+        const right_result = isNodeBalanced(branch.right, black_depth + black_depth_delta);
+
+        if (std.meta.eql(left_result, right_result))
+            return left_result
+        else
+            return unbalanced;
+    }
+
     pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         if (self.root.isLeaf()) {
             const leaf = LeafNode.fromNode(self.root);
@@ -306,11 +338,42 @@ const Cursor = struct {
             old_node = &old_parent.node;
         }
 
+        // self.balance(&new_branch_right.node);
         self.rope = Rope.initNode(new_node);
         self.curr_node = &new_branch_right.node;
         self.curr_node_offset = text.len;
         return self.rope;
     }
+
+    // fn balance(self: *Self, child_node: *Node) void {
+    //     _ = self;
+    //     // if (child_node.isLeaf()) return;
+    //     // std.debug.assert(child_node.getColor() == .red);
+    //     if (child_node.getParent()) |parent_node| {
+    //         std.debug.assert(!parent_node.isLeaf());
+    //         std.debug.assert(parent_node.getColor() == .red);
+    //         var parent = BranchNode.fromNode(parent_node);
+    //         if (parent.node.getParent()) |grandparent_node| {
+    //             std.debug.assert(!grandparent_node.isLeaf());
+    //             // std.debug.assert(grandparent_node.getColor() == .black);
+    //             var grandparent = BranchNode.fromNode(grandparent_node);
+
+    //             var updated_node: *Node = undefined;
+    //             if (grandparent.left == parent_node and parent.left == child_node) {
+    //                 // case 1
+    //             } else if (grandparent.left == parent_node and parent.right == child_node) {
+    //                 // case2
+    //             } else if (grandparent.right == parent_node and parent.left == child_node) {
+    //                 // case3
+    //             } else if (grandparent.right == parent_node and parent.right == child_node) {
+    //                 // case 4
+    //                 std.debug.print("Hello", .{});
+    //             } else {
+    //                 updated_node = grandparent_node;
+    //             }
+    //         }
+    //     }
+    // }
 
     fn delete(self: *Self, len: u32) !Self {
         _ = len;
@@ -347,9 +410,10 @@ const Buffer = struct {
 };
 
 test "Cursor basic test" {
+    std.debug.print("\n", .{});
+
     const allocator = std.testing.allocator;
     const rope0 = Rope.initEmpty(allocator);
-    std.debug.print("\n", .{});
     defer rope0.deinit();
 
     var cursor = rope0.cursor();
@@ -359,11 +423,15 @@ test "Cursor basic test" {
     const rope2 = cursor.insert(" World!");
     defer rope2.deinit();
 
-    std.debug.print("rope0 = {}\n", .{rope0});
-    std.debug.print("rope1 = {}\n", .{rope1});
-    std.debug.print("rope2 = {}\n", .{rope2});
-
     const rope3 = cursor.insert(" I");
     defer rope3.deinit();
+
+    std.debug.print("rope0 = {}\n", .{rope0});
+    try std.testing.expect(rope0.isBalanced());
+    std.debug.print("rope1 = {}\n", .{rope1});
+    try std.testing.expect(rope1.isBalanced());
+    std.debug.print("rope2 = {}\n", .{rope2});
+    try std.testing.expect(rope2.isBalanced());
     std.debug.print("rope3 = {}\n", .{rope3});
+    try std.testing.expect(rope3.isBalanced());
 }
