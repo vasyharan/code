@@ -300,8 +300,21 @@ const Cursor = struct {
     }
 
     fn insert(self: *Self, text: []const u8) Rope {
+        if (text.len == 0) {
+            self.rope = Rope.initNode(self.rope.allocator, self.rope.root);
+            return self.rope;
+        }
+
         if (!self.curr_node.isLeaf()) unreachable;
         const leaf = LeafNode.fromNode(self.curr_node);
+
+        if (leaf.val.len == 0) {
+            const new_leaf_node = LeafNode.init(self.rope.allocator, text);
+            self.rope = Rope.initNode(self.rope.allocator, &new_leaf_node.node);
+            self.curr_node = &new_leaf_node.node;
+            self.curr_node_offset = text.len;
+            return self.rope;
+        }
 
         // create a new branch node, to insert the new text into.
         const new_branch_left = leaf.slice(self.rope.allocator, 0, self.curr_node_offset);
