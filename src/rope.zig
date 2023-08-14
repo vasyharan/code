@@ -59,7 +59,7 @@ const Node = struct {
 
     fn setColor(self: *Self, colour: Colour) void {
         const mask: usize = 1;
-        self.parent_and_color = (self.parent_and_color & ~mask) | @intFromEnum(colour);
+        self.parent_and_colour = (self.parent_and_colour & ~mask) | @intFromEnum(colour);
     }
 };
 
@@ -75,13 +75,13 @@ const BranchNode = struct {
         var len: usize = 0;
         if (left) |n| {
             n.ref();
-            std.debug.assert(n.getParent() == null);
+            // std.debug.assert(n.getParent() == null);
             n.setParent(&self.node);
             len += n.len;
         }
         if (right) |n| {
             n.ref();
-            std.debug.assert(n.getParent() == null);
+            // std.debug.assert(n.getParent() == null);
             n.setParent(&self.node);
             len += n.len;
         }
@@ -90,7 +90,7 @@ const BranchNode = struct {
         self.node = Node{
             .allocator = allocator,
             .node_type = .branch,
-            .parent_and_colour = @intFromEnum(Colour.black),
+            .parent_and_colour = @intFromEnum(Colour.red),
             .len = len,
             .ref_count = 0,
         };
@@ -151,8 +151,8 @@ const BranchNode = struct {
 
     pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print(
-            "rope.BranchNode{{ .node = {*}, .ref_count = {d}, .len = {d}",
-            .{ &self.node, self.node.ref_count, self.node.len },
+            "rope.BranchNode{{ .colour = {}, .ref_count = {d}, .len = {d}",
+            .{ self.node.getColor(), self.node.ref_count, self.node.len },
         );
         if (self.left) |left| {
             if (left.isLeaf()) {
@@ -216,8 +216,8 @@ const LeafNode = struct {
 
     pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         return writer.print(
-            "rope.LeafNode{{ .node = {*}, .ref_count = {d}, .len = {d}, .val = {s} }}",
-            .{ &self.node, self.node.ref_count, self.node.len, self.val },
+            "rope.LeafNode{{ .ref_count = {d}, .len = {d}, .val = {s} }}",
+            .{ self.node.ref_count, self.node.len, self.val },
         );
     }
 
@@ -253,8 +253,7 @@ const Rope = struct {
         if (self.root.isLeaf()) {
             return true;
         } else {
-            const black_depth: usize = if (self.root.getColor() == .black) 1 else 0;
-            return isNodeBalanced(self.root, black_depth).balanced;
+            return isNodeBalanced(self.root, 0).balanced;
         }
     }
 
@@ -271,9 +270,9 @@ const Rope = struct {
             if (branch.right) |right| if (right.getColor() == .red) return unbalanced;
         }
 
-        const black_depth_delta: usize = if (node.getColor() == .black) 1 else 0;
-        const left_result = isNodeBalanced(branch.left, black_depth + black_depth_delta);
-        const right_result = isNodeBalanced(branch.right, black_depth + black_depth_delta);
+        const next_black_depth = black_depth + @as(usize, if (node.getColor() == .black) 1 else 0);
+        const left_result = isNodeBalanced(branch.left, next_black_depth);
+        const right_result = isNodeBalanced(branch.right, next_black_depth);
 
         if (std.meta.eql(left_result, right_result))
             return left_result
@@ -320,12 +319,64 @@ const Cursor = struct {
             &new_branch_right.node,
         );
 
-        // update the new node's path to the root (ancentors)
-        var old_node: *Node = &leaf.node;
-        var new_node: *Node = &new_branch.node;
-        while (old_node.getParent()) |pnode| {
-            std.debug.assert(!pnode.isLeaf());
-            const old_parent = BranchNode.fromNode(pnode);
+        // balance the newly inserted node and update
+        // the new node's path to the root (ancestors)
+        const new_root = balance(&new_branch.node, &leaf.node);
+        self.rope = Rope.initNode(new_root);
+        self.curr_node = &new_branch_right.node;
+        self.curr_node_offset = text.len;
+        return self.rope;
+    }
+
+    fn balance(nnode: *Node, onode: *Node) *Node {
+        var new_node: *Node = nnode;
+        var old_node: *Node = onode;
+        std.debug.assert(!new_node.isLeaf());
+        std.debug.assert(new_node.getColor() == .red);
+
+        while (old_node.getParent()) |parent_node| {
+            std.debug.assert(!parent_node.isLeaf());
+            if (parent_node.getColor() != .red) break;
+            if (parent_node.getParent() == null) break;
+
+            const grandparent_node = parent_node.getParent() orelse unreachable;
+            std.debug.assert(!grandparent_node.isLeaf());
+            if (grandparent_node.getColor() != .black) break;
+
+            const parent = BranchNode.fromNode(parent_node);
+            const grandparent = BranchNode.fromNode(grandparent_node);
+
+            if (grandparent.left == parent_node and parent.left == old_node) {
+                // case 1
+                unreachable;
+            } else if (grandparent.left == parent_node and parent.right == old_node) {
+                // case2
+                unreachable;
+            } else if (grandparent.right == parent_node and parent.left == old_node) {
+                // case3
+                unreachable;
+            } else if (grandparent.right == parent_node and parent.right == old_node) {
+                // case 4
+                const new_left_branch = BranchNode.init(
+                    new_node.allocator,
+                    grandparent.left,
+                    parent.left,
+                );
+                new_left_branch.node.setColor(.black);
+                const new_branch = BranchNode.init(
+                    new_node.allocator,
+                    &new_left_branch.node,
+                    new_node,
+                );
+                new_node.setColor(.black);
+                old_node = grandparent_node;
+                new_node = &new_branch.node;
+            }
+        }
+
+        while (old_node.getParent()) |parent_node| {
+            std.debug.assert(!parent_node.isLeaf());
+            const old_parent = BranchNode.fromNode(parent_node);
             const new_parent: *BranchNode = if (old_parent.left == old_node)
                 old_parent.replaceLeft(new_node)
             else if (old_parent.right == old_node)
@@ -338,42 +389,9 @@ const Cursor = struct {
             old_node = &old_parent.node;
         }
 
-        // self.balance(&new_branch_right.node);
-        self.rope = Rope.initNode(new_node);
-        self.curr_node = &new_branch_right.node;
-        self.curr_node_offset = text.len;
-        return self.rope;
+        new_node.setColor(.black);
+        return new_node;
     }
-
-    // fn balance(self: *Self, child_node: *Node) void {
-    //     _ = self;
-    //     // if (child_node.isLeaf()) return;
-    //     // std.debug.assert(child_node.getColor() == .red);
-    //     if (child_node.getParent()) |parent_node| {
-    //         std.debug.assert(!parent_node.isLeaf());
-    //         std.debug.assert(parent_node.getColor() == .red);
-    //         var parent = BranchNode.fromNode(parent_node);
-    //         if (parent.node.getParent()) |grandparent_node| {
-    //             std.debug.assert(!grandparent_node.isLeaf());
-    //             // std.debug.assert(grandparent_node.getColor() == .black);
-    //             var grandparent = BranchNode.fromNode(grandparent_node);
-
-    //             var updated_node: *Node = undefined;
-    //             if (grandparent.left == parent_node and parent.left == child_node) {
-    //                 // case 1
-    //             } else if (grandparent.left == parent_node and parent.right == child_node) {
-    //                 // case2
-    //             } else if (grandparent.right == parent_node and parent.left == child_node) {
-    //                 // case3
-    //             } else if (grandparent.right == parent_node and parent.right == child_node) {
-    //                 // case 4
-    //                 std.debug.print("Hello", .{});
-    //             } else {
-    //                 updated_node = grandparent_node;
-    //             }
-    //         }
-    //     }
-    // }
 
     fn delete(self: *Self, len: u32) !Self {
         _ = len;
@@ -414,24 +432,44 @@ test "Cursor basic test" {
 
     const allocator = std.testing.allocator;
     const rope0 = Rope.initEmpty(allocator);
-    defer rope0.deinit();
+    std.debug.print("rope0 = {}\n", .{rope0});
 
     var cursor = rope0.cursor();
-    const rope1 = cursor.insert("Hello");
-    defer rope1.deinit();
-
-    const rope2 = cursor.insert(" World!");
-    defer rope2.deinit();
-
-    const rope3 = cursor.insert(" I");
-    defer rope3.deinit();
-
-    std.debug.print("rope0 = {}\n", .{rope0});
-    try std.testing.expect(rope0.isBalanced());
-    std.debug.print("rope1 = {}\n", .{rope1});
-    try std.testing.expect(rope1.isBalanced());
-    std.debug.print("rope2 = {}\n", .{rope2});
-    try std.testing.expect(rope2.isBalanced());
-    std.debug.print("rope3 = {}\n", .{rope3});
-    try std.testing.expect(rope3.isBalanced());
+    const parts = [_][]const u8{
+        "Lorem ", // 1
+        "ipsum ", // 2
+        "dolor ", // 3
+        "sit ", // 4
+        "amet, ", // 5
+        "consectetur ", // 6
+        "adipiscing ", // 7
+        "elit, ", // 8
+        "sed ", // 9
+        "do ", // 10
+        "eiusmod ", // 11
+        "tempor ", // 12
+        "incididunt ", // 13
+        "ut ", // 14
+        "labore ", // 15
+        "et ", // 16
+        "dolore ", // 17
+        "magna ", // 18
+        "aliqua", // 19
+    };
+    // var ropes = [_]?Rope{null} ** parts.len;
+    // defer {
+    //     for (ropes) |maybe_rope| {
+    //         if (maybe_rope) |rope| rope.deinit();
+    //     }
+    // }
+    var prev_rope = rope0;
+    for (parts, 0..) |part, i| {
+        const rope = cursor.insert(part);
+        // ropes[i] = rope;
+        std.debug.print("rope{} = {}\n", .{ i + 1, rope });
+        try std.testing.expect(rope.isBalanced());
+        prev_rope.deinit();
+        prev_rope = rope;
+    }
+    prev_rope.deinit();
 }
