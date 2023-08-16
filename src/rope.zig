@@ -3,6 +3,16 @@ const Allocator = std.mem.Allocator;
 
 const Error = error{EOS};
 
+const PositionType = enum { byte_offset, line_and_column };
+const Position = union(PositionType) {
+    byte_offset: usize,
+    line_and_column: LineAndColumn,
+};
+const LineAndColumn = struct {
+    line: usize,
+    column: usize,
+};
+
 const Colour = enum(u1) { red, black };
 const NodeType = enum(u8) {
     branch,
@@ -62,6 +72,7 @@ const BranchNode = struct {
     right: ?*Node,
 
     fn init(allocator: Allocator, left: ?*Node, right: ?*Node) *Node {
+        std.debug.assert((left == null and right == null) or (left != null));
         const self = allocator.create(Node) catch @panic("oom");
         self.* = Node{
             .branch = BranchNode{
@@ -129,6 +140,7 @@ const BranchNode = struct {
     }
 
     fn replaceLeft(self: Self, allocator: Allocator, left: ?*Node) *Node {
+        std.debug.assert((left == null and self.right == null) or (left != null));
         const replaced = allocator.create(Node) catch @panic("oom");
         replaced.* = Node{
             .branch = .{
@@ -151,6 +163,7 @@ const BranchNode = struct {
     }
 
     fn replaceRight(self: Self, allocator: Allocator, right: ?*Node) *Node {
+        std.debug.assert((self.left == null and right == null) or (self.left != null));
         const replaced = allocator.create(Node) catch @panic("oom");
         replaced.* = Node{
             .branch = .{
@@ -293,6 +306,10 @@ const Rope = struct {
         return Cursor.init(self);
     }
 
+    fn len(self: Self) usize {
+        return self.root.len();
+    }
+
     fn isBalanced(self: Self) bool {
         return switch (self.root.*) {
             .leaf => true,
@@ -330,6 +347,93 @@ const Rope = struct {
         }
     }
 
+    fn insertAt(self: Self, pos: Position, text: []const u8) !Rope {
+        var leaf_offset: usize = 0;
+        const leaf = try leafNodeAt(self.root, pos, &leaf_offset);
+        if (text.len == 0) {
+            return Rope.initNode(self.allocator, self.root);
+        }
+
+        if (leaf.val.len == 0) {
+            const new_leaf_node = LeafNode.init(self.allocator, text);
+            return Rope.initNode(self.allocator, new_leaf_node);
+        }
+
+        // create a new branch node, to insert the new text into.
+        const new_branch_left = leaf.slice(self.allocator, 0, leaf_offset);
+        const new_branch_right = LeafNode.init(self.allocator, text);
+        const new_branch = BranchNode.init(
+            self.allocator,
+            new_branch_left,
+            new_branch_right,
+        );
+
+        // balance the newly inserted node and update
+        // the new node's path to the root (ancestors)
+        const new_root = self.balance(&new_branch.branch, leaf);
+        return Rope.initNode(self.allocator, new_root);
+    }
+
+    fn balance(self: Self, new_branch_node: *BranchNode, old_leaf_node: *LeafNode) *Node {
+        var new_node: *BranchNode = new_branch_node;
+        var old_node: *Node = old_leaf_node.getNode();
+        std.debug.assert(new_node.getColour() == .red);
+
+        while (old_node.getParent()) |parent| {
+            if (parent.getColour() != .red) break;
+            if (parent.getParent() == null) break;
+
+            const grandparent = parent.getParent() orelse unreachable;
+            if (grandparent.getColour() != .black) break;
+
+            const parent_node = parent.getNode();
+            if (grandparent.left == parent_node and parent.left == old_node) {
+                // case 1
+                unreachable; // only ever append to the right.
+            } else if (grandparent.left == parent_node and parent.right == old_node) {
+                // case2
+                unreachable; // only ever append to the right.
+            } else if (grandparent.right == parent_node and parent.left == old_node) {
+                // case3
+                unreachable; // unimplemented
+            } else if (grandparent.right == parent_node and parent.right == old_node) {
+                // case 4
+                const new_left_branch = BranchNode.init(
+                    self.allocator,
+                    grandparent.left,
+                    parent.left,
+                );
+                new_left_branch.branch.setColour(.black);
+                const new_branch = BranchNode.init(
+                    self.allocator,
+                    new_left_branch,
+                    new_node.getNode(),
+                );
+                new_node.setColour(.black);
+                old_node = grandparent.getNode();
+                new_node = &new_branch.branch;
+            }
+        }
+
+        while (old_node.getParent()) |old_parent| {
+            // std.debug.assert(!parent_node.isLeaf());
+            // const old_parent = BranchNokVjkde.fromNode(parent_node);
+            const new_parent: *Node = if (old_parent.left == old_node)
+                old_parent.replaceLeft(self.allocator, new_node.getNode())
+            else if (old_parent.right == old_node)
+                old_parent.replaceRight(self.allocator, new_node.getNode())
+            else
+                unreachable;
+
+            new_node.setParent(&new_parent.branch);
+            new_node = &new_parent.branch;
+            old_node = old_parent.getNode();
+        }
+
+        new_node.setColour(.black);
+        return new_node.getNode();
+    }
+
     pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         return switch (self.root.*) {
             .leaf => |leaf| writer.print("rope.Rope{{ root = {} }}", .{leaf}),
@@ -351,108 +455,6 @@ const Cursor = struct {
             .curr_node = rope.root,
             .curr_node_offset = 0,
         };
-    }
-
-    fn insert(self: *Self, text: []const u8) Rope {
-        switch (self.curr_node.*) {
-            .branch => unreachable,
-            .leaf => |*leaf| {
-                if (text.len == 0) {
-                    self.rope = Rope.initNode(self.rope.allocator, self.rope.root);
-                    return self.rope;
-                }
-
-                if (leaf.val.len == 0) {
-                    const new_leaf_node = LeafNode.init(self.rope.allocator, text);
-                    self.rope = Rope.initNode(self.rope.allocator, new_leaf_node);
-                    self.curr_node = new_leaf_node;
-                    self.curr_node_offset = text.len;
-                    return self.rope;
-                }
-
-                // create a new branch node, to insert the new text into.
-                const new_branch_left = leaf.slice(self.rope.allocator, 0, self.curr_node_offset);
-                const new_branch_right = LeafNode.init(self.rope.allocator, text);
-                const new_branch = BranchNode.init(
-                    self.rope.allocator,
-                    new_branch_left,
-                    new_branch_right,
-                );
-
-                // balance the newly inserted node and update
-                // the new node's path to the root (ancestors)
-                const new_root = self.balance(&new_branch.branch, leaf);
-                self.rope = Rope.initNode(self.rope.allocator, new_root);
-                self.curr_node = new_branch_right;
-                self.curr_node_offset = text.len;
-                return self.rope;
-            },
-        }
-    }
-
-    fn balance(self: Self, new_branch_node: *BranchNode, old_leaf_node: *LeafNode) *Node {
-        var new_node: *BranchNode = new_branch_node;
-        var old_node: *Node = old_leaf_node.getNode();
-        std.debug.assert(new_node.getColour() == .red);
-
-        while (old_node.getParent()) |parent| {
-            if (parent.getColour() != .red) break;
-            if (parent.getParent() == null) break;
-
-            const grandparent = parent.getParent() orelse unreachable;
-            if (grandparent.getColour() != .black) break;
-
-            const parent_node = parent.getNode();
-            if (grandparent.left == parent_node and parent.left == old_node) {
-                // case 1
-                unreachable;
-            } else if (grandparent.left == parent_node and parent.right == old_node) {
-                // case2
-                unreachable;
-            } else if (grandparent.right == parent_node and parent.left == old_node) {
-                // case3
-                unreachable;
-            } else if (grandparent.right == parent_node and parent.right == old_node) {
-                // case 4
-                const new_left_branch = BranchNode.init(
-                    self.rope.allocator,
-                    grandparent.left,
-                    parent.left,
-                );
-                new_left_branch.branch.setColour(.black);
-                const new_branch = BranchNode.init(
-                    self.rope.allocator,
-                    new_left_branch,
-                    new_node.getNode(),
-                );
-                new_node.setColour(.black);
-                old_node = grandparent.getNode();
-                new_node = &new_branch.branch;
-            }
-        }
-
-        while (old_node.getParent()) |old_parent| {
-            // std.debug.assert(!parent_node.isLeaf());
-            // const old_parent = BranchNode.fromNode(parent_node);
-            const new_parent: *Node = if (old_parent.left == old_node)
-                old_parent.replaceLeft(self.rope.allocator, new_node.getNode())
-            else if (old_parent.right == old_node)
-                old_parent.replaceRight(self.rope.allocator, new_node.getNode())
-            else
-                unreachable;
-
-            new_node.setParent(&new_parent.branch);
-            new_node = &new_parent.branch;
-            old_node = old_parent.getNode();
-        }
-
-        new_node.setColour(.black);
-        return new_node.getNode();
-    }
-
-    fn delete(self: *Self, len: u32) !Self {
-        _ = len;
-        _ = self;
     }
 
     fn next(self: *Self, maxlen: u32) []u8 {
@@ -491,7 +493,6 @@ test "Cursor basic test" {
     const rope0 = Rope.initEmpty(allocator);
     std.debug.print("rope0 = {}\n", .{rope0});
 
-    var cursor = rope0.cursor();
     const parts = [_][]const u8{
         "Lorem ", // 1
         "ipsum ", // 2
@@ -516,11 +517,47 @@ test "Cursor basic test" {
 
     var prev_rope = rope0;
     for (parts, 0..) |part, i| {
-        const rope = cursor.insert(part);
+        const rope = try prev_rope.insertAt(.{ .byte_offset = prev_rope.len() }, part);
+        prev_rope.deinit();
         std.debug.print("rope{} = {}\n", .{ i + 1, rope });
         try std.testing.expect(rope.isBalanced());
-        prev_rope.deinit();
         prev_rope = rope;
     }
     prev_rope.deinit();
+}
+
+fn leafNodeAt(root: *Node, pos: Position, node_offset: *usize) !*LeafNode {
+    return switch (pos) {
+        .byte_offset => |byte_offset| leafNodeAtByteOffset(root, byte_offset, node_offset),
+        .line_and_column => unreachable, //|p| leafNodeAtLineAndColumn(root, p.line, p.column),
+    };
+}
+
+fn leafNodeAtByteOffset(root: *Node, byte_offset: usize, node_offset: *usize) !*LeafNode {
+    var node: *Node = root;
+    var offset = byte_offset;
+    while (true) {
+        if (offset > node.len()) return Error.EOS;
+        switch (node.*) {
+            .leaf => |*leaf| {
+                node_offset.* = offset;
+                return leaf;
+            },
+            .branch => |branch| {
+                if (branch.left) |left| {
+                    const left_len = left.len();
+                    if (left_len > offset) {
+                        node = left;
+                        continue;
+                    } else if (branch.right) |right| {
+                        node = right;
+                        offset -= left.len();
+                        continue;
+                    }
+                }
+            },
+        }
+        unreachable;
+    }
+    unreachable;
 }
