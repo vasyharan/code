@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 
 const Error = error{EOS};
 
+const StackError = error{Empty};
+
 const PositionType = enum { byte_offset, line_and_column };
 const Position = union(PositionType) {
     byte_offset: usize,
@@ -45,18 +47,134 @@ const Node = union(NodeType) {
             .branch => |branch| branch.len,
         };
     }
+};
+
+const LeafNodePath = struct {
+    const Self = @This();
+
+    parents: BranchNodeStack,
+    leaf: *LeafNode,
+    offset: usize,
+
+    fn deinit(self: *Self, allocator: Allocator) void {
+        self.parents.deinit(allocator);
+    }
 
     fn getParent(self: Self) ?*BranchNode {
-        return switch (self) {
-            .leaf => |leaf| leaf.getParent(),
-            .branch => |branch| branch.getParent(),
+        if (self.parents) |parents| return parents.item;
+        return null;
+    }
+
+    fn getGrandparent(self: Self) ?*BranchNode {
+        if (self.parents) |parents| {
+            if (parents.next) |grandparents| {
+                return grandparents.item;
+            }
+        }
+        return null;
+    }
+};
+
+const BranchNodeStackNode = struct {
+    const Self = @This();
+
+    item: *BranchNode,
+    next: ?*BranchNodeStackNode,
+    prev: ?*BranchNodeStackNode,
+
+    fn init(allocator: Allocator, item: *BranchNode) *Self {
+        const self = allocator.create(Self) catch @panic("oom");
+        self.* = .{ .item = item, .next = null, .prev = null };
+        return self;
+    }
+};
+
+const BranchNodeStack = struct {
+    const Self = @This();
+
+    head: ?*BranchNodeStackNode,
+    tail: ?*BranchNodeStackNode,
+
+    fn initEmpty() Self {
+        return .{
+            .head = null,
+            .tail = null,
         };
     }
 
-    fn setParent(self: *Self, parent: ?*BranchNode) void {
-        switch (self.*) {
-            .leaf => |*leaf| leaf.setParent(parent),
-            .branch => |*branch| branch.setParent(parent),
+    fn deinit(self: *Self, allocator: Allocator) void {
+        while (!self.isEmpty()) _ = self.pop(allocator) catch unreachable;
+    }
+
+    fn isEmpty(self: Self) bool {
+        return self.head == null;
+    }
+
+    fn push(self: *Self, allocator: Allocator, item: *BranchNode) void {
+        const node = BranchNodeStackNode.init(allocator, item);
+        if (self.tail) |tail| {
+            tail.next = node;
+            node.prev = tail;
+            self.tail = node;
+        } else {
+            std.debug.assert(self.head == null);
+            self.head = node;
+            self.tail = node;
+        }
+    }
+
+    fn pop(self: *Self, allocator: Allocator) StackError!*BranchNode {
+        if (self.tail == null) {
+            std.debug.assert(self.head == null);
+            return StackError.Empty;
+        }
+        const tail = self.tail.?;
+        const item = tail.item;
+        const prev = tail.prev;
+        allocator.destroy(tail);
+        self.tail = prev;
+        if (self.tail) |new_tail| {
+            new_tail.next = null;
+        } else {
+            self.head = null;
+        }
+        return item;
+    }
+
+    fn popN(self: *Self, allocator: Allocator, n: usize) StackError!void {
+        for (0..n) |_| {
+            _ = try self.pop(allocator);
+        }
+    }
+
+    fn peek(self: Self) ?*BranchNode {
+        return self.peekNth(0);
+    }
+
+    fn peekNth(self: Self, n: usize) ?*BranchNode {
+        var stack = self.tail;
+        for (0..n) |_| {
+            if (stack) |s|
+                stack = s.prev
+            else
+                break;
+        }
+        return if (stack) |s| s.item else null;
+    }
+
+    fn concat(self: *Self, _: Allocator, other: *Self) void {
+        var maybe_head = other.head;
+        while (maybe_head) |node| {
+            if (self.tail) |tail| {
+                tail.next = node;
+                node.prev = tail;
+                self.tail = node;
+            } else {
+                std.debug.assert(self.head == null);
+                self.head = node;
+                self.tail = node;
+            }
+            maybe_head = node.next;
         }
     }
 };
@@ -64,7 +182,7 @@ const Node = union(NodeType) {
 const BranchNode = struct {
     const Self = @This();
 
-    parent_and_colour: usize, // parent | colour
+    colour: Colour,
     ref_count: u16,
     len: usize,
 
@@ -78,19 +196,17 @@ const BranchNode = struct {
             .branch = BranchNode{
                 .left = left,
                 .right = right,
-                .parent_and_colour = @intFromEnum(Colour.red),
+                .colour = .red,
                 .len = 0,
                 .ref_count = 0,
             },
         };
         if (left) |n| {
             n.ref();
-            n.setParent(&self.branch);
             self.branch.len += n.len();
         }
         if (right) |n| {
             n.ref();
-            n.setParent(&self.branch);
             self.branch.len += n.len();
         }
         return self;
@@ -116,27 +232,12 @@ const BranchNode = struct {
         return self.getParent() == null;
     }
 
-    fn getParent(self: Self) ?*BranchNode {
-        const mask: usize = 1;
-        comptime {
-            std.debug.assert(@alignOf(*Self) >= 2);
-        }
-        const maybe_ptr = self.parent_and_colour & ~mask;
-        return if (maybe_ptr == 0) null else @as(*BranchNode, @ptrFromInt(maybe_ptr));
-    }
-
-    fn setParent(self: *Self, parent: ?*BranchNode) void {
-        self.parent_and_colour = @intFromPtr(parent) | (self.parent_and_colour & 1);
-    }
-
     fn getColour(self: Self) Colour {
-        const colour_int = @as(u1, @intCast(self.parent_and_colour & 1));
-        return @as(Colour, @enumFromInt(colour_int));
+        return self.colour;
     }
 
     fn setColour(self: *Self, colour: Colour) void {
-        const mask: usize = 1;
-        self.parent_and_colour = (self.parent_and_colour & ~mask) | @intFromEnum(colour);
+        self.colour = colour;
     }
 
     fn replaceLeft(self: Self, allocator: Allocator, left: ?*Node) *Node {
@@ -146,7 +247,7 @@ const BranchNode = struct {
             .branch = .{
                 .left = left,
                 .right = self.right,
-                .parent_and_colour = @intFromEnum(self.getColour()),
+                .colour = self.getColour(),
                 .len = 0,
                 .ref_count = 0,
             },
@@ -169,7 +270,7 @@ const BranchNode = struct {
             .branch = .{
                 .left = self.left,
                 .right = right,
-                .parent_and_colour = @intFromEnum(self.getColour()),
+                .colour = self.getColour(),
                 .len = 0,
                 .ref_count = 0,
             },
@@ -198,8 +299,8 @@ const BranchNode = struct {
         }
         if (self.right) |right| {
             switch (right.*) {
-                .leaf => |leaf| try writer.print(", .right = {}", .{leaf}),
-                .branch => |branch| try writer.print(", .right = {}", .{branch}),
+                .leaf => |leaf| try writer.print(", .right = {},", .{leaf}),
+                .branch => |branch| try writer.print(", .right = {},", .{branch}),
             }
         }
         try writer.print(" }}", .{});
@@ -213,7 +314,6 @@ const BranchNode = struct {
 const LeafNode = struct {
     const Self = @This();
 
-    parent_and_colour: usize, // parent | colour
     ref_count: u16,
     len: usize,
     val: []const u8,
@@ -227,7 +327,6 @@ const LeafNode = struct {
         self.* = Node{
             .leaf = LeafNode{
                 .val = val,
-                .parent_and_colour = @intFromEnum(Colour.black),
                 .len = val.len,
                 .ref_count = 0,
             },
@@ -251,19 +350,6 @@ const LeafNode = struct {
 
     fn isRoot(self: Self) bool {
         return self.getParent() == null;
-    }
-
-    fn getParent(self: Self) ?*BranchNode {
-        const mask: usize = 1;
-        comptime {
-            std.debug.assert(@alignOf(*Self) >= 2);
-        }
-        const maybe_ptr = self.parent_and_colour & ~mask;
-        return if (maybe_ptr == 0) null else @as(*BranchNode, @ptrFromInt(maybe_ptr));
-    }
-
-    fn setParent(self: *Self, parent: ?*BranchNode) void {
-        self.parent_and_colour = @intFromPtr(parent) | (self.parent_and_colour & 1);
     }
 
     fn slice(self: Self, allocator: Allocator, start: usize, end: usize) *Node {
@@ -324,7 +410,7 @@ const Rope = struct {
         const node = maybe_node orelse unreachable;
         switch (node.*) {
             .leaf => return .{ .balanced = true, .black_height = black_depth },
-            .branch => |branch| {
+            .branch => |*branch| {
                 const unbalanced = .{ .balanced = false };
                 if (branch.getColour() == .red) {
                     if (branch.left) |left|
@@ -348,19 +434,18 @@ const Rope = struct {
     }
 
     fn insertAt(self: Self, pos: Position, text: []const u8) !Rope {
-        var leaf_offset: usize = 0;
-        const leaf = try leafNodeAt(self.root, pos, &leaf_offset);
         if (text.len == 0) {
             return Rope.initNode(self.allocator, self.root);
         }
 
-        if (leaf.val.len == 0) {
+        const leaf_path = try getLeafNodeAtPosition(self.allocator, self.root, pos);
+        if (leaf_path.leaf.val.len == 0) {
             const new_leaf_node = LeafNode.init(self.allocator, text);
             return Rope.initNode(self.allocator, new_leaf_node);
         }
 
         // create a new branch node, to insert the new text into.
-        const new_branch_left = leaf.slice(self.allocator, 0, leaf_offset);
+        const new_branch_left = leaf_path.leaf.slice(self.allocator, 0, leaf_path.offset);
         const new_branch_right = LeafNode.init(self.allocator, text);
         const new_branch = BranchNode.init(
             self.allocator,
@@ -370,20 +455,22 @@ const Rope = struct {
 
         // balance the newly inserted node and update
         // the new node's path to the root (ancestors)
-        const new_root = self.balance(&new_branch.branch, leaf);
+        const new_root = self.balance(&new_branch.branch, leaf_path);
         return Rope.initNode(self.allocator, new_root);
     }
 
-    fn balance(self: Self, new_branch_node: *BranchNode, old_leaf_node: *LeafNode) *Node {
+    fn balance(self: Self, new_branch_node: *BranchNode, leaf_path: LeafNodePath) *Node {
         var new_node: *BranchNode = new_branch_node;
-        var old_node: *Node = old_leaf_node.getNode();
+        var old_node: *Node = leaf_path.leaf.getNode();
+        var parent_stack = leaf_path.parents;
         std.debug.assert(new_node.getColour() == .red);
 
-        while (old_node.getParent()) |parent| {
+        while (parent_stack.peekNth(0)) |parent| {
             if (parent.getColour() != .red) break;
-            if (parent.getParent() == null) break;
 
-            const grandparent = parent.getParent() orelse unreachable;
+            const maybe_grandparent = parent_stack.peekNth(1);
+            if (maybe_grandparent == null) break;
+            const grandparent = maybe_grandparent.?;
             if (grandparent.getColour() != .black) break;
 
             const parent_node = parent.getNode();
@@ -410,14 +497,14 @@ const Rope = struct {
                     new_node.getNode(),
                 );
                 new_node.setColour(.black);
-                old_node = grandparent.getNode();
+
                 new_node = &new_branch.branch;
+                old_node = grandparent.getNode();
+                parent_stack.popN(self.allocator, 2) catch unreachable;
             }
         }
 
-        while (old_node.getParent()) |old_parent| {
-            // std.debug.assert(!parent_node.isLeaf());
-            // const old_parent = BranchNokVjkde.fromNode(parent_node);
+        while (parent_stack.peekNth(0)) |old_parent| {
             const new_parent: *Node = if (old_parent.left == old_node)
                 old_parent.replaceLeft(self.allocator, new_node.getNode())
             else if (old_parent.right == old_node)
@@ -425,9 +512,9 @@ const Rope = struct {
             else
                 unreachable;
 
-            new_node.setParent(&new_parent.branch);
             new_node = &new_parent.branch;
             old_node = old_parent.getNode();
+            _ = parent_stack.pop(self.allocator) catch unreachable;
         }
 
         new_node.setColour(.black);
@@ -436,8 +523,8 @@ const Rope = struct {
 
     pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         return switch (self.root.*) {
-            .leaf => |leaf| writer.print("rope.Rope{{ root = {} }}", .{leaf}),
-            .branch => |branch| writer.print("rope.Rope{{ root = {} }}", .{branch}),
+            .leaf => |leaf| writer.print("rope.Rope{{ .root = {} }}", .{leaf}),
+            .branch => |branch| writer.print("rope.Rope{{ .root = {} }}", .{branch}),
         };
     }
 };
@@ -446,28 +533,33 @@ const Cursor = struct {
     const Self = @This();
 
     rope: Rope,
-    curr_node: *Node,
-    curr_node_offset: usize,
+    leaf_path: ?LeafNodePath,
 
     fn init(rope: Rope) Self {
         return Self{
             .rope = rope,
-            .curr_node = rope.root,
-            .curr_node_offset = 0,
+            .leaf_path = getLeftMostLeafNode(rope.allocator, rope.root),
         };
     }
 
-    fn next(self: *Self, maxlen: u32) []u8 {
-        _ = maxlen;
-        _ = self;
+    fn deinit(self: *Self) void {
+        if (self.leaf_path) |*leaf_path| leaf_path.deinit(self.rope.allocator);
     }
 
-    fn advanceBytes(self: *Self, bytes: u32) !void {
-        _ = bytes;
-        switch (self.curr_node.node_type) {
-            .leaf => {},
-            .branch => {},
+    fn next(self: *Self, maxlen: u32) ?[]const u8 {
+        if (self.leaf_path) |*leaf_path| {
+            const leaf = leaf_path.leaf;
+            const from = leaf_path.offset;
+            const to = @min(from + maxlen, leaf.len);
+            if (leaf_path.leaf.len > to) {
+                // stay on the same node.
+                leaf_path.offset = to;
+            } else {
+                self.leaf_path = getNextLeafNode(self.rope.allocator, leaf_path.*);
+            }
+            return leaf.val[from..to];
         }
+        return null;
     }
 };
 
@@ -486,64 +578,25 @@ const Buffer = struct {
     }
 };
 
-test "Cursor basic test" {
-    std.debug.print("\n", .{});
-
-    const allocator = std.testing.allocator;
-    const rope0 = Rope.initEmpty(allocator);
-    std.debug.print("rope0 = {}\n", .{rope0});
-
-    const parts = [_][]const u8{
-        "Lorem ", // 1
-        "ipsum ", // 2
-        "dolor ", // 3
-        "sit ", // 4
-        "amet, ", // 5
-        "consectetur ", // 6
-        "adipiscing ", // 7
-        "elit, ", // 8
-        "sed ", // 9
-        "do ", // 10
-        "eiusmod ", // 11
-        "tempor ", // 12
-        "incididunt ", // 13
-        "ut ", // 14
-        "labore ", // 15
-        "et ", // 16
-        "dolore ", // 17
-        "magna ", // 18
-        "aliqua", // 19
-    };
-
-    var prev_rope = rope0;
-    for (parts, 0..) |part, i| {
-        const rope = try prev_rope.insertAt(.{ .byte_offset = prev_rope.len() }, part);
-        prev_rope.deinit();
-        std.debug.print("rope{} = {}\n", .{ i + 1, rope });
-        try std.testing.expect(rope.isBalanced());
-        prev_rope = rope;
-    }
-    prev_rope.deinit();
-}
-
-fn leafNodeAt(root: *Node, pos: Position, node_offset: *usize) !*LeafNode {
+fn getLeafNodeAtPosition(allocator: Allocator, root: *Node, pos: Position) !LeafNodePath {
     return switch (pos) {
-        .byte_offset => |byte_offset| leafNodeAtByteOffset(root, byte_offset, node_offset),
+        .byte_offset => |byte_offset| getLeafNodeAtByteOffset(allocator, root, byte_offset),
         .line_and_column => unreachable, //|p| leafNodeAtLineAndColumn(root, p.line, p.column),
     };
 }
 
-fn leafNodeAtByteOffset(root: *Node, byte_offset: usize, node_offset: *usize) !*LeafNode {
+fn getLeafNodeAtByteOffset(allocator: Allocator, root: *Node, byte_offset: usize) !LeafNodePath {
     var node: *Node = root;
     var offset = byte_offset;
+    var parents = BranchNodeStack.initEmpty();
     while (true) {
         if (offset > node.len()) return Error.EOS;
         switch (node.*) {
             .leaf => |*leaf| {
-                node_offset.* = offset;
-                return leaf;
+                return .{ .parents = parents, .leaf = leaf, .offset = offset };
             },
-            .branch => |branch| {
+            .branch => |*branch| {
+                parents.push(allocator, branch);
                 if (branch.left) |left| {
                     const left_len = left.len();
                     if (left_len > offset) {
@@ -560,4 +613,103 @@ fn leafNodeAtByteOffset(root: *Node, byte_offset: usize, node_offset: *usize) !*
         unreachable;
     }
     unreachable;
+}
+
+fn getLeftMostLeafNode(allocator: Allocator, from_node: *Node) LeafNodePath {
+    var maybe_node: ?*Node = from_node;
+    var parents = BranchNodeStack.initEmpty();
+    while (maybe_node) |node| {
+        switch (node.*) {
+            .branch => |*branch| {
+                parents.push(allocator, branch);
+                maybe_node = branch.left;
+            },
+            .leaf => |*leaf| {
+                return .{ .parents = parents, .leaf = leaf, .offset = 0 };
+            },
+        }
+    }
+    unreachable;
+}
+
+fn getNextLeafNode(allocator: Allocator, from_leaf_path: LeafNodePath) ?LeafNodePath {
+    var from_leaf = from_leaf_path.leaf;
+    var parents = from_leaf_path.parents;
+    var search_node: ?*Node = from_leaf.getNode();
+
+    while (!parents.isEmpty()) {
+        const parent = parents.peekNth(0).?;
+        if (parent.left == search_node and parent.right != null) {
+            var nlp = getLeftMostLeafNode(allocator, parent.right.?);
+            parents.concat(allocator, &nlp.parents);
+            return .{ .leaf = nlp.leaf, .offset = nlp.offset, .parents = parents };
+        } else if (parent.right == search_node) {
+            _ = parents.pop(allocator) catch unreachable;
+            search_node = parent.getNode();
+        } else {
+            return null;
+        }
+    }
+    return null;
+}
+
+const parts = [_][]const u8{
+    "Lorem ", // 1
+    "ipsum ", // 2
+    "dolor ", // 3
+    "sit ", // 4
+    "amet ", // 5
+    "consectetur ", // 6
+    "adipiscing ", // 7
+    "elit ", // 8
+    "sed ", // 9
+    "do ", // 10
+    "eiusmod ", // 11
+    "tempor ", // 12
+    "incididunt ", // 13
+    "ut ", // 14
+    "labore ", // 15
+    "et ", // 16
+    "dolore ", // 17
+    "magna ", // 18
+    "aliqua", // 19
+};
+
+test "Rope basic test" {
+    std.debug.print("\n", .{});
+
+    const allocator = std.testing.allocator;
+    const rope0 = Rope.initEmpty(allocator);
+    std.debug.print("rope0 = {}\n", .{rope0});
+
+    var prev_rope = rope0;
+    for (parts, 0..) |part, i| {
+        const rope = try prev_rope.insertAt(.{ .byte_offset = prev_rope.len() }, part);
+        prev_rope.deinit();
+        std.debug.print("rope{} = {}\n", .{ i + 1, rope });
+        try std.testing.expect(rope.isBalanced());
+        prev_rope = rope;
+    }
+    prev_rope.deinit();
+}
+
+test "Cursor basic tests" {
+    std.debug.print("\n", .{});
+
+    const allocator = std.testing.allocator;
+    var rope = Rope.initEmpty(allocator);
+    for (parts) |part| {
+        const new_rope = try rope.insertAt(.{ .byte_offset = rope.len() }, part);
+        try std.testing.expect(new_rope.isBalanced());
+        rope.deinit();
+        rope = new_rope;
+    }
+
+    defer rope.deinit();
+    var cursor = rope.cursor();
+    defer cursor.deinit();
+    for (parts) |part| {
+        std.debug.print("{s}", .{part});
+        try std.testing.expectEqualStrings(part, cursor.next(32).?);
+    }
 }
