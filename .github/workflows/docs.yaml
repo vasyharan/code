@@ -1,15 +1,12 @@
 name: Docs
 
-permissions:
-  contents: write
-
 on:
+  workflow_dispatch: {}
   push:
     branches: [main]
     paths: 
       - ".github/workflows/docs.yaml"
       - "docs/**"
-
   pull_request:
     branches: [main]
     paths:
@@ -17,25 +14,53 @@ on:
       - "docs/**"
 
 jobs:
-  build-deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout 🛎
         uses: actions/checkout@v2
 
+      - name: Install nix 🚧
+        uses: cachix/install-nix-action@v22
+
+      - name: Install cachix ⚡
+        uses: cachix/cachix-action@v12
+        with:
+          name: devenv
+
+      - name: Install devenv.sh 🧰
+        run: nix profile install tarball+https://install.devenv.sh/latest
+        shell: sh
+
       - name: Install dependencies 🔧
-        run: |
-          cargo install mdbook
-          cargo install mdbook-d2 --locked
+        run: devenv ci
 
       - name: Build 🏗️
         run: |
-          mdbook build -- docs
+          devenv shell -- mdbook build docs
 
-      - name: Deploy to GitHub Pages 🚀
-        if: ${{ github.event_name != 'pull_request' }}
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Upload GitHub Pages artifact 🗜️
+        uses: actions/upload-pages-artifact@v2
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs/book
+          path: docs/book
+
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write      # to deploy to Pages
+      id-token: write   # to verify the deployment originates from an appropriate source
+
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages 🚀
+        id: deployment
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/deploy-pages@v2
