@@ -1,0 +1,11 @@
+[book]
+language = "en"
+multilingual = false
+src = "src"
+title = "Toku"
+
+[output.html]
+additional-css = ["theme/css/main.css"]
+
+[preprocessor.graphviz]
+output-to-file = false 

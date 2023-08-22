@@ -1,0 +1,7 @@
+@font-face {
+  font-family: 'Virgil';
+  font-style: normal;
+  font-weight: 500;
+  src: url('../../fonts/Virgil.woff2') format('woff2');
+  font-display: swap;
+}

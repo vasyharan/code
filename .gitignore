@@ -1,6 +1,9 @@
 .devenv/
 .direnv/
 
+# mdbook
+docs/book
+
 # build artifacts
 /dep/
 /src/tree-sitter/queries/

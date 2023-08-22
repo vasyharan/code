@@ -1,5 +1,6 @@
 {
     "recommendations": [
-        "ziglang.vscode-zig"
+        "ziglang.vscode-zig",
+        "be5invis.toml"
     ]
 }

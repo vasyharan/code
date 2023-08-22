@@ -24,5 +24,8 @@ in {
   packages = [
     pkgs.gdb
     unstable.zls
+    unstable.mdbook
+    unstable.graphviz
+    unstable.mdbook-graphviz
   ];
 }
