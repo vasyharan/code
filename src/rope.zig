@@ -186,11 +186,10 @@ const BranchNode = struct {
     ref_count: u16,
     len: usize,
 
-    left: ?*Node,
-    right: ?*Node,
+    left: *Node,
+    right: *Node,
 
-    fn init(allocator: Allocator, left: ?*Node, right: ?*Node) *Node {
-        std.debug.assert((left == null and right == null) or (left != null));
+    fn init(allocator: Allocator, left: *Node, right: *Node) *Node {
         const self = allocator.create(Node) catch @panic("oom");
         self.* = Node{
             .branch = BranchNode{
@@ -201,20 +200,16 @@ const BranchNode = struct {
                 .ref_count = 0,
             },
         };
-        if (left) |n| {
-            n.ref();
-            self.branch.len += n.len();
-        }
-        if (right) |n| {
-            n.ref();
-            self.branch.len += n.len();
-        }
+        left.ref();
+        self.branch.len += left.len();
+        right.ref();
+        self.branch.len += right.len();
         return self;
     }
 
     fn deinit(self: *Self, allocator: Allocator) void {
-        if (self.left) |left| left.deref(allocator);
-        if (self.right) |right| right.deref(allocator);
+        self.left.deref(allocator);
+        self.right.deref(allocator);
         allocator.destroy(self.getNode());
     }
 
@@ -240,8 +235,7 @@ const BranchNode = struct {
         self.colour = colour;
     }
 
-    fn replaceLeft(self: Self, allocator: Allocator, left: ?*Node) *Node {
-        std.debug.assert((left == null and self.right == null) or (left != null));
+    fn replaceLeft(self: Self, allocator: Allocator, left: *Node) *Node {
         const replaced = allocator.create(Node) catch @panic("oom");
         replaced.* = Node{
             .branch = .{
@@ -252,19 +246,14 @@ const BranchNode = struct {
                 .ref_count = 0,
             },
         };
-        if (left) |n| {
-            n.ref();
-            replaced.branch.len = n.len();
-        }
-        if (self.right) |n| {
-            n.ref();
-            replaced.branch.len += n.len();
-        }
+        left.ref();
+        replaced.branch.len = left.len();
+        self.right.ref();
+        replaced.branch.len += self.right.len();
         return replaced;
     }
 
-    fn replaceRight(self: Self, allocator: Allocator, right: ?*Node) *Node {
-        std.debug.assert((self.left == null and right == null) or (self.left != null));
+    fn replaceRight(self: Self, allocator: Allocator, right: *Node) *Node {
         const replaced = allocator.create(Node) catch @panic("oom");
         replaced.* = Node{
             .branch = .{
@@ -275,14 +264,10 @@ const BranchNode = struct {
                 .ref_count = 0,
             },
         };
-        if (right) |n| {
-            n.ref();
-            replaced.branch.len = n.len();
-        }
-        if (self.left) |n| {
-            n.ref();
-            replaced.branch.len += n.len();
-        }
+        right.ref();
+        replaced.branch.len = right.len();
+        self.left.ref();
+        replaced.branch.len += self.left.len();
         return replaced;
     }
 
@@ -291,17 +276,13 @@ const BranchNode = struct {
             "rope.BranchNode{{ .colour = {}, .ref_count = {d}, .len = {d}",
             .{ self.getColour(), self.ref_count, self.len },
         );
-        if (self.left) |left| {
-            switch (left.*) {
-                .leaf => |leaf| try writer.print(", .left = {}", .{leaf}),
-                .branch => |branch| try writer.print(", .left = {}", .{branch}),
-            }
+        switch (self.left.*) {
+            .leaf => |leaf| try writer.print(", .left = {}", .{leaf}),
+            .branch => |branch| try writer.print(", .left = {}", .{branch}),
         }
-        if (self.right) |right| {
-            switch (right.*) {
-                .leaf => |leaf| try writer.print(", .right = {},", .{leaf}),
-                .branch => |branch| try writer.print(", .right = {},", .{branch}),
-            }
+        switch (self.right.*) {
+            .leaf => |leaf| try writer.print(", .right = {},", .{leaf}),
+            .branch => |branch| try writer.print(", .right = {},", .{branch}),
         }
         try writer.print(" }}", .{});
     }
@@ -388,52 +369,15 @@ const Rope = struct {
         self.root.deref(self.allocator);
     }
 
-    fn cursor(self: Self) Cursor {
+    pub fn cursor(self: Self) Cursor {
         return Cursor.init(self);
     }
 
-    fn len(self: Self) usize {
+    pub fn len(self: Self) usize {
         return self.root.len();
     }
 
-    fn isBalanced(self: Self) bool {
-        return switch (self.root.*) {
-            .leaf => true,
-            .branch => isNodeBalanced(self.root, 0).balanced,
-        };
-    }
-
-    fn isNodeBalanced(maybe_node: ?*Node, black_depth: usize) struct { balanced: bool, black_height: usize = 0 } {
-        if (maybe_node == null)
-            return .{ .balanced = true, .black_height = black_depth };
-
-        const node = maybe_node orelse unreachable;
-        switch (node.*) {
-            .leaf => return .{ .balanced = true, .black_height = black_depth },
-            .branch => |*branch| {
-                const unbalanced = .{ .balanced = false };
-                if (branch.getColour() == .red) {
-                    if (branch.left) |left|
-                        if (@as(NodeType, left.*) == NodeType.branch and
-                            left.branch.getColour() == .red) return unbalanced;
-                    if (branch.right) |right|
-                        if (@as(NodeType, right.*) == NodeType.branch and
-                            right.branch.getColour() == .red) return unbalanced;
-                }
-
-                const next_black_depth = black_depth + @as(usize, if (branch.getColour() == .black) 1 else 0);
-                const left_result = isNodeBalanced(branch.left, next_black_depth);
-                const right_result = isNodeBalanced(branch.right, next_black_depth);
-
-                if (std.meta.eql(left_result, right_result))
-                    return left_result
-                else
-                    return unbalanced;
-            },
-        }
-    }
-
-    fn insertAt(self: Self, pos: Position, text: []const u8) !Rope {
+    pub fn insertAt(self: Self, pos: Position, text: []const u8) !Rope {
         if (text.len == 0) {
             return Rope.initNode(self.allocator, self.root);
         }
@@ -457,6 +401,41 @@ const Rope = struct {
         // the new node's path to the root (ancestors)
         const new_root = self.balance(&new_branch.branch, leaf_path);
         return Rope.initNode(self.allocator, new_root);
+    }
+
+    fn isBalanced(self: Self) bool {
+        return switch (self.root.*) {
+            .leaf => true,
+            .branch => isNodeBalanced(self.root, 0).balanced,
+        };
+    }
+
+    fn isNodeBalanced(maybe_node: ?*Node, black_depth: usize) struct { balanced: bool, black_height: usize = 0 } {
+        if (maybe_node == null)
+            return .{ .balanced = true, .black_height = black_depth };
+
+        const node = maybe_node orelse unreachable;
+        switch (node.*) {
+            .leaf => return .{ .balanced = true, .black_height = black_depth },
+            .branch => |*branch| {
+                const unbalanced = .{ .balanced = false };
+                if (branch.getColour() == .red) {
+                    if (@as(NodeType, branch.left.*) == NodeType.branch and
+                        branch.left.branch.getColour() == .red) return unbalanced;
+                    if (@as(NodeType, branch.right.*) == NodeType.branch and
+                        branch.right.branch.getColour() == .red) return unbalanced;
+                }
+
+                const next_black_depth = black_depth + @as(usize, if (branch.getColour() == .black) 1 else 0);
+                const left_result = isNodeBalanced(branch.left, next_black_depth);
+                const right_result = isNodeBalanced(branch.right, next_black_depth);
+
+                if (std.meta.eql(left_result, right_result))
+                    return left_result
+                else
+                    return unbalanced;
+            },
+        }
     }
 
     fn balance(self: Self, new_branch_node: *BranchNode, leaf_path: LeafNodePath) *Node {
@@ -563,21 +542,6 @@ const Cursor = struct {
     }
 };
 
-const Buffer = struct {
-    const Self = @This();
-    const RopeList = std.ArrayList(Rope);
-
-    allocator: Allocator,
-    versions: RopeList,
-
-    fn initEmpty(allocator: Allocator) !Self {
-        return Self{
-            .allocator = allocator,
-            .versions = RopeList.init(allocator),
-        };
-    }
-};
-
 fn getLeafNodeAtPosition(allocator: Allocator, root: *Node, pos: Position) !LeafNodePath {
     return switch (pos) {
         .byte_offset => |byte_offset| getLeafNodeAtByteOffset(allocator, root, byte_offset),
@@ -597,17 +561,14 @@ fn getLeafNodeAtByteOffset(allocator: Allocator, root: *Node, byte_offset: usize
             },
             .branch => |*branch| {
                 parents.push(allocator, branch);
-                if (branch.left) |left| {
-                    const left_len = left.len();
-                    if (left_len > offset) {
-                        node = left;
-                        continue;
-                    } else if (branch.right) |right| {
-                        node = right;
-                        offset -= left.len();
-                        continue;
-                    }
+                const left_len = branch.left.len();
+                if (left_len > offset) {
+                    node = branch.left;
+                } else {
+                    offset -= left_len;
+                    node = branch.right;
                 }
+                continue;
             },
         }
         unreachable;
@@ -639,8 +600,8 @@ fn getNextLeafNode(allocator: Allocator, from_leaf_path: LeafNodePath) ?LeafNode
 
     while (!parents.isEmpty()) {
         const parent = parents.peekNth(0).?;
-        if (parent.left == search_node and parent.right != null) {
-            var nlp = getLeftMostLeafNode(allocator, parent.right.?);
+        if (parent.left == search_node) {
+            var nlp = getLeftMostLeafNode(allocator, parent.right);
             parents.concat(allocator, &nlp.parents);
             return .{ .leaf = nlp.leaf, .offset = nlp.offset, .parents = parents };
         } else if (parent.right == search_node) {
@@ -675,7 +636,7 @@ const parts = [_][]const u8{
     "aliqua", // 19
 };
 
-test "Rope basic test" {
+test "Rope basic tests" {
     std.debug.print("\n", .{});
 
     const allocator = std.testing.allocator;
@@ -683,10 +644,11 @@ test "Rope basic test" {
     std.debug.print("rope0 = {}\n", .{rope0});
 
     var prev_rope = rope0;
-    for (parts, 0..) |part, i| {
+    // for (parts, 0..) |part, i| {
+    for (parts) |part| {
         const rope = try prev_rope.insertAt(.{ .byte_offset = prev_rope.len() }, part);
         prev_rope.deinit();
-        std.debug.print("rope{} = {}\n", .{ i + 1, rope });
+        // std.debug.print("rope{} = {}\n", .{ i + 1, rope });
         try std.testing.expect(rope.isBalanced());
         prev_rope = rope;
     }
@@ -709,7 +671,7 @@ test "Cursor basic tests" {
     var cursor = rope.cursor();
     defer cursor.deinit();
     for (parts) |part| {
-        std.debug.print("{s}", .{part});
+        // std.debug.print("{s}", .{part});
         try std.testing.expectEqualStrings(part, cursor.next(32).?);
     }
 }
