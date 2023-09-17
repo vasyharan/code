@@ -506,6 +506,15 @@ const Rope = struct {
             .branch => |branch| writer.print("rope.Rope{{ .root = {} }}", .{branch}),
         };
     }
+
+    pub fn writeDot(self: Self, writer: anytype) !void {
+        try writer.print("digraph {{\n", .{});
+        switch (self.root.*) {
+            .leaf => |*leaf| try writeLeafDot(leaf, writer),
+            .branch => |*branch| try writeBranchDot(branch, writer),
+        }
+        try writer.print("}}", .{});
+    }
 };
 
 const Cursor = struct {
@@ -612,6 +621,39 @@ fn getNextLeafNode(allocator: Allocator, from_leaf_path: LeafNodePath) ?LeafNode
         }
     }
     return null;
+}
+
+fn writeLeafDot(leaf: *const LeafNode, writer: anytype) !void {
+    try writer.print("\tn{x}[shape=square,label=\"'{s}'\"];\n", .{ @intFromPtr(leaf), leaf.val });
+}
+
+fn writeBranchDot(branch: *const BranchNode, writer: anytype) !void {
+    try writer.print("\tn{x}[shape=circle,color={s},label=\"{x} ({})\"];\n", .{
+        @intFromPtr(branch),
+        @tagName(branch.getColour()),
+        @intFromPtr(branch) & 0xffffff,
+        branch.ref_count,
+    });
+    switch (branch.left.*) {
+        .leaf => |*left| {
+            try writeLeafDot(left, writer);
+            try writer.print("\tn{x} -> n{x};\n", .{ @intFromPtr(branch), @intFromPtr(left) });
+        },
+        .branch => |*left| {
+            try writeBranchDot(left, writer);
+            try writer.print("\tn{x} -> n{x};\n", .{ @intFromPtr(branch), @intFromPtr(left) });
+        },
+    }
+    switch (branch.right.*) {
+        .leaf => |*right| {
+            try writeLeafDot(right, writer);
+            try writer.print("\tn{x} -> n{x};\n", .{ @intFromPtr(branch), @intFromPtr(right) });
+        },
+        .branch => |*right| {
+            try writeBranchDot(right, writer);
+            try writer.print("\tn{x} -> n{x};\n", .{ @intFromPtr(branch), @intFromPtr(right) });
+        },
+    }
 }
 
 const parts = [_][]const u8{
