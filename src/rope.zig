@@ -41,10 +41,10 @@ const Node = union(NodeType) {
         }
     }
 
-    fn len(self: Self) usize {
+    fn lenBytes(self: Self) usize {
         return switch (self) {
-            .leaf => |leaf| leaf.len,
-            .branch => |branch| branch.len,
+            .leaf => |leaf| leaf.len_bytes,
+            .branch => |branch| branch.len_bytes,
         };
     }
 };
@@ -184,7 +184,7 @@ const BranchNode = struct {
 
     colour: Colour,
     ref_count: u16,
-    len: usize,
+    len_bytes: usize,
 
     left: *Node,
     right: *Node,
@@ -196,14 +196,14 @@ const BranchNode = struct {
                 .left = left,
                 .right = right,
                 .colour = .red,
-                .len = 0,
+                .len_bytes = 0,
                 .ref_count = 0,
             },
         };
         left.ref();
-        self.branch.len += left.len();
+        self.branch.len_bytes += left.lenBytes();
         right.ref();
-        self.branch.len += right.len();
+        self.branch.len_bytes += right.lenBytes();
         return self;
     }
 
@@ -242,14 +242,14 @@ const BranchNode = struct {
                 .left = left,
                 .right = self.right,
                 .colour = self.getColour(),
-                .len = 0,
+                .len_bytes = 0,
                 .ref_count = 0,
             },
         };
         left.ref();
-        replaced.branch.len = left.len();
+        replaced.branch.len_bytes = left.lenBytes();
         self.right.ref();
-        replaced.branch.len += self.right.len();
+        replaced.branch.len_bytes += self.right.lenBytes();
         return replaced;
     }
 
@@ -260,21 +260,21 @@ const BranchNode = struct {
                 .left = self.left,
                 .right = right,
                 .colour = self.getColour(),
-                .len = 0,
+                .len_bytes = 0,
                 .ref_count = 0,
             },
         };
         right.ref();
-        replaced.branch.len = right.len();
+        replaced.branch.len_bytes = right.lenBytes();
         self.left.ref();
-        replaced.branch.len += self.left.len();
+        replaced.branch.len_bytes += self.left.lenBytes();
         return replaced;
     }
 
     pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print(
-            "rope.BranchNode{{ .colour = {}, .ref_count = {d}, .len = {d}",
-            .{ self.getColour(), self.ref_count, self.len },
+            "rope.BranchNode{{ .colour = {}, .ref_count = {d}, .len_bytes = {d}",
+            .{ self.getColour(), self.ref_count, self.len_bytes },
         );
         switch (self.left.*) {
             .leaf => |leaf| try writer.print(", .left = {}", .{leaf}),
@@ -296,7 +296,7 @@ const LeafNode = struct {
     const Self = @This();
 
     ref_count: u16,
-    len: usize,
+    len_bytes: usize,
     val: []const u8,
 
     fn initEmpty(allocator: Allocator) *Node {
@@ -308,7 +308,7 @@ const LeafNode = struct {
         self.* = Node{
             .leaf = LeafNode{
                 .val = val,
-                .len = val.len,
+                .len_bytes = val.len,
                 .ref_count = 0,
             },
         };
@@ -339,8 +339,8 @@ const LeafNode = struct {
 
     pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         return writer.print(
-            "rope.LeafNode{{ .ref_count = {d}, .len = {d}, .val = {s} }}",
-            .{ self.ref_count, self.len, self.val },
+            "rope.LeafNode{{ .ref_count = {d}, .len_bytes = {d}, .val = {s} }}",
+            .{ self.ref_count, self.len_bytes, self.val },
         );
     }
 
@@ -373,8 +373,8 @@ const Rope = struct {
         return Cursor.init(self);
     }
 
-    pub fn len(self: Self) usize {
-        return self.root.len();
+    pub fn lenBytes(self: Self) usize {
+        return self.root.lenBytes();
     }
 
     pub fn insertAt(self: Self, pos: Position, text: []const u8) !Rope {
@@ -383,7 +383,7 @@ const Rope = struct {
         }
 
         const leaf_path = try getLeafNodeAtPosition(self.allocator, self.root, pos);
-        if (leaf_path.leaf.val.len == 0) {
+        if (leaf_path.leaf.len_bytes == 0) {
             const new_leaf_node = LeafNode.init(self.allocator, text);
             return Rope.initNode(self.allocator, new_leaf_node);
         }
@@ -538,8 +538,8 @@ const Cursor = struct {
         if (self.leaf_path) |*leaf_path| {
             const leaf = leaf_path.leaf;
             const from = leaf_path.offset;
-            const to = @min(from + maxlen, leaf.len);
-            if (leaf_path.leaf.len > to) {
+            const to = @min(from + maxlen, leaf.len_bytes);
+            if (leaf_path.leaf.len_bytes > to) {
                 // stay on the same node.
                 leaf_path.offset = to;
             } else {
@@ -563,18 +563,18 @@ fn getLeafNodeAtByteOffset(allocator: Allocator, root: *Node, byte_offset: usize
     var offset = byte_offset;
     var parents = BranchNodeStack.initEmpty();
     while (true) {
-        if (offset > node.len()) return Error.EOS;
+        if (offset > node.lenBytes()) return Error.EOS;
         switch (node.*) {
             .leaf => |*leaf| {
                 return .{ .parents = parents, .leaf = leaf, .offset = offset };
             },
             .branch => |*branch| {
                 parents.push(allocator, branch);
-                const left_len = branch.left.len();
-                if (left_len > offset) {
+                const left_len_bytes = branch.left.lenBytes();
+                if (left_len_bytes > offset) {
                     node = branch.left;
                 } else {
-                    offset -= left_len;
+                    offset -= left_len_bytes;
                     node = branch.right;
                 }
                 continue;
@@ -688,7 +688,7 @@ test "Rope basic tests" {
     var prev_rope = rope0;
     // for (parts, 0..) |part, i| {
     for (parts) |part| {
-        const rope = try prev_rope.insertAt(.{ .byte_offset = prev_rope.len() }, part);
+        const rope = try prev_rope.insertAt(.{ .byte_offset = prev_rope.lenBytes() }, part);
         prev_rope.deinit();
         // std.debug.print("rope{} = {}\n", .{ i + 1, rope });
         try std.testing.expect(rope.isBalanced());
@@ -703,7 +703,7 @@ test "Cursor basic tests" {
     const allocator = std.testing.allocator;
     var rope = Rope.initEmpty(allocator);
     for (parts) |part| {
-        const new_rope = try rope.insertAt(.{ .byte_offset = rope.len() }, part);
+        const new_rope = try rope.insertAt(.{ .byte_offset = rope.lenBytes() }, part);
         try std.testing.expect(new_rope.isBalanced());
         rope.deinit();
         rope = new_rope;
