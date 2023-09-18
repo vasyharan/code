@@ -18,9 +18,17 @@ pub fn build(b: *std.build.Builder) void {
         .link_libc = true,
     });
     treesitter.step.dependOn(&treesitter_repo.step);
-    treesitter.addCSourceFile(b.pathJoin(&[_][]const u8{ treesitter_repo.getPath(&treesitter.step), "lib/src/lib.c" }), &.{});
-    treesitter.addIncludePath(b.pathJoin(&[_][]const u8{ treesitter_repo.getPath(&treesitter.step), "lib/include" }));
-    treesitter.addIncludePath(b.pathJoin(&[_][]const u8{ treesitter_repo.getPath(&treesitter.step), "lib/src" }));
+    // treesitter.addCSourceFile(b.pathJoin(&[_][]const u8{ treesitter_repo.getPath(&treesitter.step), "lib/src/lib.c" }));
+    treesitter.addCSourceFile(std.Build.CompileStep.CSourceFile{
+        .file = std.Build.LazyPath{ .path = b.pathJoin(&[_][]const u8{ treesitter_repo.getPath(&treesitter.step), "lib/src/lib.c" }) },
+        .flags = &[_][]const u8{},
+    });
+    treesitter.addIncludePath(std.Build.LazyPath{
+        .path = b.pathJoin(&[_][]const u8{ treesitter_repo.getPath(&treesitter.step), "lib/include" }),
+    });
+    treesitter.addIncludePath(std.Build.LazyPath{
+        .path = b.pathJoin(&[_][]const u8{ treesitter_repo.getPath(&treesitter.step), "lib/src" }),
+    });
 
     const treesitter_zig_repo = GitRepoStep.create(b, .{
         .url = "https://github.com/maxxnino/tree-sitter-zig",
@@ -29,7 +37,10 @@ pub fn build(b: *std.build.Builder) void {
         .fetch_enabled = true,
     });
     treesitter.step.dependOn(&treesitter_zig_repo.step);
-    treesitter.addCSourceFile(b.pathJoin(&[_][]const u8{ treesitter_zig_repo.getPath(&treesitter.step), "src/parser.c" }), &.{});
+    treesitter.addCSourceFile(std.Build.CompileStep.CSourceFile{
+        .file = std.Build.LazyPath{ .path = b.pathJoin(&[_][]const u8{ treesitter_zig_repo.getPath(&treesitter.step), "src/parser.c" }) },
+        .flags = &[_][]const u8{},
+    });
 
     const treesitter_zig_queries = MyBuildStep.create(
         b,
@@ -46,7 +57,9 @@ pub fn build(b: *std.build.Builder) void {
         .optimize = optimize,
     });
     exe.step.dependOn(&treesitter_zig_queries.step);
-    exe.addIncludePath(b.pathJoin(&[_][]const u8{ treesitter_repo.getPath(&treesitter.step), "lib/include" }));
+    exe.addIncludePath(std.Build.LazyPath{
+        .path = b.pathJoin(&[_][]const u8{ treesitter_repo.getPath(&treesitter.step), "lib/include" }),
+    });
     exe.linkLibrary(treesitter);
     b.installArtifact(exe);
 
