@@ -56,8 +56,8 @@ const LeafNodePath = struct {
     leaf: *LeafNode,
     offset: usize,
 
-    fn deinit(self: *Self, allocator: Allocator) void {
-        self.parents.deinit(allocator);
+    fn deinit(self: *Self) void {
+        self.parents.deinit();
     }
 
     fn getParent(self: Self) ?*BranchNode {
@@ -75,96 +75,46 @@ const LeafNodePath = struct {
     }
 };
 
-const BranchNodeStackNode = struct {
-    const Self = @This();
+pub fn Deque(comptime T: type) type {
+    const StackNode = struct {
+        const Self = @This();
 
-    item: *BranchNode,
-    next: ?*BranchNodeStackNode,
-    prev: ?*BranchNodeStackNode,
+        item: T,
+        next: ?*Self,
+        prev: ?*Self,
 
-    fn init(allocator: Allocator, item: *BranchNode) *Self {
-        const self = allocator.create(Self) catch @panic("oom");
-        self.* = .{ .item = item, .next = null, .prev = null };
-        return self;
-    }
-};
-
-const BranchNodeStack = struct {
-    const Self = @This();
-
-    head: ?*BranchNodeStackNode,
-    tail: ?*BranchNodeStackNode,
-
-    fn initEmpty() Self {
-        return .{
-            .head = null,
-            .tail = null,
-        };
-    }
-
-    fn deinit(self: *Self, allocator: Allocator) void {
-        while (!self.isEmpty()) _ = self.pop(allocator) catch unreachable;
-    }
-
-    fn isEmpty(self: Self) bool {
-        return self.head == null;
-    }
-
-    fn push(self: *Self, allocator: Allocator, item: *BranchNode) void {
-        const node = BranchNodeStackNode.init(allocator, item);
-        if (self.tail) |tail| {
-            tail.next = node;
-            node.prev = tail;
-            self.tail = node;
-        } else {
-            std.debug.assert(self.head == null);
-            self.head = node;
-            self.tail = node;
+        fn init(allocator: Allocator, item: T) *Self {
+            const self = allocator.create(Self) catch @panic("oom");
+            self.* = .{ .item = item, .next = null, .prev = null };
+            return self;
         }
-    }
+    };
 
-    fn pop(self: *Self, allocator: Allocator) StackError!*BranchNode {
-        if (self.tail == null) {
-            std.debug.assert(self.head == null);
-            return StackError.Empty;
+    return struct {
+        const Self = @This();
+
+        allocator: Allocator,
+        head: ?*StackNode,
+        tail: ?*StackNode,
+
+        fn initEmpty(allocator: Allocator) Self {
+            return .{
+                .allocator = allocator,
+                .head = null,
+                .tail = null,
+            };
         }
-        const tail = self.tail.?;
-        const item = tail.item;
-        const prev = tail.prev;
-        allocator.destroy(tail);
-        self.tail = prev;
-        if (self.tail) |new_tail| {
-            new_tail.next = null;
-        } else {
-            self.head = null;
+
+        fn deinit(self: *Self) void {
+            while (!self.isEmpty()) _ = self.pop() catch unreachable;
         }
-        return item;
-    }
 
-    fn popN(self: *Self, allocator: Allocator, n: usize) StackError!void {
-        for (0..n) |_| {
-            _ = try self.pop(allocator);
+        fn isEmpty(self: Self) bool {
+            return self.head == null;
         }
-    }
 
-    fn peek(self: Self) ?*BranchNode {
-        return self.peekNth(0);
-    }
-
-    fn peekNth(self: Self, n: usize) ?*BranchNode {
-        var stack = self.tail;
-        for (0..n) |_| {
-            if (stack) |s|
-                stack = s.prev
-            else
-                break;
-        }
-        return if (stack) |s| s.item else null;
-    }
-
-    fn concat(self: *Self, _: Allocator, other: *Self) void {
-        var maybe_head = other.head;
-        while (maybe_head) |node| {
+        fn push(self: *Self, item: T) void {
+            const node = StackNode.init(self.allocator, item);
             if (self.tail) |tail| {
                 tail.next = node;
                 node.prev = tail;
@@ -174,10 +124,66 @@ const BranchNodeStack = struct {
                 self.head = node;
                 self.tail = node;
             }
-            maybe_head = node.next;
         }
-    }
-};
+
+        fn pop(self: *Self) StackError!T {
+            if (self.tail == null) {
+                std.debug.assert(self.head == null);
+                return StackError.Empty;
+            }
+            const tail = self.tail.?;
+            const item = tail.item;
+            const prev = tail.prev;
+            self.allocator.destroy(tail);
+            self.tail = prev;
+            if (self.tail) |new_tail| {
+                new_tail.next = null;
+            } else {
+                self.head = null;
+            }
+            return item;
+        }
+
+        fn popN(self: *Self, n: usize) StackError!void {
+            for (0..n) |_| {
+                _ = try self.pop();
+            }
+        }
+
+        fn peek(self: Self) ?T {
+            return self.peekNth(0);
+        }
+
+        fn peekNth(self: Self, n: usize) ?T {
+            var stack = self.tail;
+            for (0..n) |_| {
+                if (stack) |s|
+                    stack = s.prev
+                else
+                    break;
+            }
+            return if (stack) |s| s.item else null;
+        }
+
+        fn append(self: *Self, other: *Self) void {
+            var maybe_head = other.head;
+            while (maybe_head) |node| {
+                if (self.tail) |tail| {
+                    tail.next = node;
+                    node.prev = tail;
+                    self.tail = node;
+                } else {
+                    std.debug.assert(self.head == null);
+                    self.head = node;
+                    self.tail = node;
+                }
+                maybe_head = node.next;
+            }
+        }
+    };
+}
+
+const BranchNodeStack = Deque(*BranchNode);
 
 const BranchNode = struct {
     const Self = @This();
@@ -479,7 +485,7 @@ const Rope = struct {
 
                 new_node = &new_branch.branch;
                 old_node = grandparent.getNode();
-                parent_stack.popN(self.allocator, 2) catch unreachable;
+                parent_stack.popN(2) catch unreachable;
             }
         }
 
@@ -493,7 +499,7 @@ const Rope = struct {
 
             new_node = &new_parent.branch;
             old_node = old_parent.getNode();
-            _ = parent_stack.pop(self.allocator) catch unreachable;
+            _ = parent_stack.pop() catch unreachable;
         }
 
         new_node.setColour(.black);
@@ -531,7 +537,7 @@ const Cursor = struct {
     }
 
     fn deinit(self: *Self) void {
-        if (self.leaf_path) |*leaf_path| leaf_path.deinit(self.rope.allocator);
+        if (self.leaf_path) |*leaf_path| leaf_path.deinit();
     }
 
     fn next(self: *Self, maxlen: u32) ?[]const u8 {
@@ -561,7 +567,7 @@ fn getLeafNodeAtPosition(allocator: Allocator, root: *Node, pos: Position) !Leaf
 fn getLeafNodeAtByteOffset(allocator: Allocator, root: *Node, byte_offset: usize) !LeafNodePath {
     var node: *Node = root;
     var offset = byte_offset;
-    var parents = BranchNodeStack.initEmpty();
+    var parents = BranchNodeStack.initEmpty(allocator);
     while (true) {
         if (offset > node.lenBytes()) return Error.EOS;
         switch (node.*) {
@@ -569,7 +575,7 @@ fn getLeafNodeAtByteOffset(allocator: Allocator, root: *Node, byte_offset: usize
                 return .{ .parents = parents, .leaf = leaf, .offset = offset };
             },
             .branch => |*branch| {
-                parents.push(allocator, branch);
+                parents.push(branch);
                 const left_len_bytes = branch.left.lenBytes();
                 if (left_len_bytes > offset) {
                     node = branch.left;
@@ -587,11 +593,11 @@ fn getLeafNodeAtByteOffset(allocator: Allocator, root: *Node, byte_offset: usize
 
 fn getLeftMostLeafNode(allocator: Allocator, from_node: *Node) LeafNodePath {
     var maybe_node: ?*Node = from_node;
-    var parents = BranchNodeStack.initEmpty();
+    var parents = BranchNodeStack.initEmpty(allocator);
     while (maybe_node) |node| {
         switch (node.*) {
             .branch => |*branch| {
-                parents.push(allocator, branch);
+                parents.push(branch);
                 maybe_node = branch.left;
             },
             .leaf => |*leaf| {
@@ -611,10 +617,10 @@ fn getNextLeafNode(allocator: Allocator, from_leaf_path: LeafNodePath) ?LeafNode
         const parent = parents.peekNth(0).?;
         if (parent.left == search_node) {
             var nlp = getLeftMostLeafNode(allocator, parent.right);
-            parents.concat(allocator, &nlp.parents);
+            parents.append(&nlp.parents);
             return .{ .leaf = nlp.leaf, .offset = nlp.offset, .parents = parents };
         } else if (parent.right == search_node) {
-            _ = parents.pop(allocator) catch unreachable;
+            _ = parents.pop() catch unreachable;
             search_node = parent.getNode();
         } else {
             return null;
