@@ -375,6 +375,10 @@ const Rope = struct {
         self.root.deref(self.allocator);
     }
 
+    pub fn clone(self: Self) Self {
+        return Rope.initNode(self.allocator, self.root);
+    }
+
     pub fn cursor(self: Self) Cursor {
         return Cursor.init(self);
     }
@@ -405,8 +409,28 @@ const Rope = struct {
 
         // balance the newly inserted node and update
         // the new node's path to the root (ancestors)
-        const new_root = self.balance(&new_branch.branch, leaf_path);
+        const new_root = self.balance(&new_branch.branch, leaf_path.leaf, leaf_path.parents);
         return Rope.initNode(self.allocator, new_root);
+    }
+
+    pub fn deleteAt(self: Self, pos: Position, len: usize) !Self {
+        if (len == 0) {
+            return Rope.initNode(self.allocator, self.root);
+        }
+
+        var remaining_len = len;
+        var leaf_path = try getLeafNodeAtPosition(self.allocator, self.root, pos);
+        // loop until the requested number of bytes have been deleted.
+        while (remaining_len > 0) {
+            const leaf_path_len_bytes = leaf_path.leaf.len_bytes - leaf_path.offset;
+            if (leaf_path_len_bytes > remaining_len or (leaf_path_len_bytes == remaining_len and leaf_path.offset > 0)) {
+                // handle deleting a leaf node val without needing to remove the leaf node.
+                return self.deleteLeaf(leaf_path.leaf, leaf_path.parents, leaf_path.offset, leaf_path.offset + remaining_len);
+            }
+
+            unreachable;
+        }
+        unreachable;
     }
 
     fn isBalanced(self: Self) bool {
@@ -444,16 +468,65 @@ const Rope = struct {
         }
     }
 
-    fn balance(self: Self, new_branch_node: *BranchNode, leaf_path: LeafNodePath) *Node {
+    fn deleteLeaf(self: Self, leaf: *LeafNode, path: BranchNodeStack, from: usize, to: usize) Self {
+        std.debug.assert(from >= 0 and from <= leaf.len_bytes and from < to);
+        std.debug.assert(to >= 0 and to <= leaf.len_bytes and to > from);
+        std.debug.assert(to - from < leaf.len_bytes);
+        var parents = path;
+        if (from > 0 and to < leaf.len_bytes) {
+            // case 1: delete the middle of the node's val; eg. "a(bcdef)g".
+            //      replace the leaf node with a branch node, with the left
+            //      branch including the contents before ("a") and the right
+            //      branch including the contents after ("g")
+            const new_branch_left = leaf.slice(self.allocator, 0, from);
+            const new_branch_right = leaf.slice(self.allocator, to, leaf.len_bytes);
+            const new_branch = BranchNode.init(self.allocator, new_branch_left, new_branch_right);
+
+            // balance the newly inserted node and update
+            // the new node's path to the root (ancestors)
+            const new_root = self.balance(&new_branch.branch, leaf, parents);
+            return Rope.initNode(self.allocator, new_root);
+        }
+
+        var old_node = leaf.getNode();
+        var new_node = if (from == 0 and to < leaf.len_bytes)
+            // case 2: delete the end of the node's val; eg. "a(bcdefg)".
+            //      replace the leaf node with a new leaf node with just the
+            //      contents before ("a")
+            LeafNode.init(self.allocator, leaf.val[to..])
+        else if (from > 0 and to == leaf.len_bytes)
+            // case 3: delete the start of the node's val; eg. "(abcdef)g".
+            //      replace the leaf node with a new leaf node with just the
+            //      contents after ("g")
+            LeafNode.init(self.allocator, leaf.val[from..to])
+        else
+            unreachable;
+
+        while (parents.peekNth(0)) |old_parent| {
+            new_node = if (old_parent.left == old_node)
+                old_parent.replaceLeft(self.allocator, new_node)
+            else if (old_parent.right == old_node)
+                old_parent.replaceRight(self.allocator, new_node)
+            else
+                unreachable;
+
+            old_node = old_parent.getNode();
+            _ = parents.pop() catch unreachable;
+        }
+
+        return Rope.initNode(self.allocator, new_node);
+    }
+
+    fn balance(self: Self, new_branch_node: *BranchNode, leaf: *LeafNode, path: BranchNodeStack) *Node {
         var new_node: *BranchNode = new_branch_node;
-        var old_node: *Node = leaf_path.leaf.getNode();
-        var parent_stack = leaf_path.parents;
+        var old_node: *Node = leaf.getNode();
+        var parents = path;
         std.debug.assert(new_node.getColour() == .red);
 
-        while (parent_stack.peekNth(0)) |parent| {
+        while (parents.peekNth(0)) |parent| {
             if (parent.getColour() != .red) break;
 
-            const maybe_grandparent = parent_stack.peekNth(1);
+            const maybe_grandparent = parents.peekNth(1);
             if (maybe_grandparent == null) break;
             const grandparent = maybe_grandparent.?;
             if (grandparent.getColour() != .black) break;
@@ -464,7 +537,27 @@ const Rope = struct {
                 unreachable; // only ever append to the right.
             } else if (grandparent.left == parent_node and parent.right == old_node) {
                 // case2
-                unreachable; // only ever append to the right.
+                const new_left_branch = BranchNode.init(
+                    self.allocator,
+                    parent.left,
+                    new_node.left,
+                );
+                new_left_branch.branch.setColour(.black);
+                const new_right_branch = BranchNode.init(
+                    self.allocator,
+                    new_node.right,
+                    grandparent.right,
+                );
+                new_right_branch.branch.setColour(.black);
+                const new_branch = BranchNode.init(
+                    self.allocator,
+                    new_left_branch,
+                    new_right_branch,
+                );
+
+                new_node = &new_branch.branch;
+                old_node = grandparent.getNode();
+                parents.popN(2) catch unreachable;
             } else if (grandparent.right == parent_node and parent.left == old_node) {
                 // case3
                 unreachable; // unimplemented
@@ -485,11 +578,11 @@ const Rope = struct {
 
                 new_node = &new_branch.branch;
                 old_node = grandparent.getNode();
-                parent_stack.popN(2) catch unreachable;
+                parents.popN(2) catch unreachable;
             }
         }
 
-        while (parent_stack.peekNth(0)) |old_parent| {
+        while (parents.peekNth(0)) |old_parent| {
             const new_parent: *Node = if (old_parent.left == old_node)
                 old_parent.replaceLeft(self.allocator, new_node.getNode())
             else if (old_parent.right == old_node)
@@ -499,7 +592,7 @@ const Rope = struct {
 
             new_node = &new_parent.branch;
             old_node = old_parent.getNode();
-            _ = parent_stack.pop() catch unreachable;
+            _ = parents.pop() catch unreachable;
         }
 
         new_node.setColour(.black);
@@ -634,30 +727,31 @@ fn writeLeafDot(leaf: *const LeafNode, writer: anytype) !void {
 }
 
 fn writeBranchDot(branch: *const BranchNode, writer: anytype) !void {
-    try writer.print("\tn{x}[shape=circle,color={s},label=\"{x} ({})\"];\n", .{
-        @intFromPtr(branch),
-        @tagName(branch.getColour()),
-        @intFromPtr(branch) & 0xffffff,
-        branch.ref_count,
-    });
+    // try writer.print("\tn{x}[shape=circle,color={s},label=\"{x} ({})\"];\n", .{
+    //     @intFromPtr(branch),
+    //     @tagName(branch.getColour()),
+    //     @intFromPtr(branch) & 0xffffff,
+    //     branch.ref_count,
+    // });
+    try writer.print("\tn{x}[shape=circle,color={s},label=\"\"];\n", .{ @intFromPtr(branch), @tagName(branch.getColour()) });
     switch (branch.left.*) {
         .leaf => |*left| {
             try writeLeafDot(left, writer);
-            try writer.print("\tn{x} -> n{x};\n", .{ @intFromPtr(branch), @intFromPtr(left) });
+            try writer.print("\tn{x} -> n{x} [label=\"{}\"];\n", .{ @intFromPtr(branch), @intFromPtr(left), left.len_bytes });
         },
         .branch => |*left| {
             try writeBranchDot(left, writer);
-            try writer.print("\tn{x} -> n{x};\n", .{ @intFromPtr(branch), @intFromPtr(left) });
+            try writer.print("\tn{x} -> n{x} [label=\"{}\"];\n", .{ @intFromPtr(branch), @intFromPtr(left), left.len_bytes });
         },
     }
     switch (branch.right.*) {
         .leaf => |*right| {
             try writeLeafDot(right, writer);
-            try writer.print("\tn{x} -> n{x};\n", .{ @intFromPtr(branch), @intFromPtr(right) });
+            try writer.print("\tn{x} -> n{x} [label=\"{}\"];\n", .{ @intFromPtr(branch), @intFromPtr(right), right.len_bytes });
         },
         .branch => |*right| {
             try writeBranchDot(right, writer);
-            try writer.print("\tn{x} -> n{x};\n", .{ @intFromPtr(branch), @intFromPtr(right) });
+            try writer.print("\tn{x} -> n{x} [label=\"{}\"];\n", .{ @intFromPtr(branch), @intFromPtr(right), right.len_bytes });
         },
     }
 }
@@ -685,22 +779,59 @@ const parts = [_][]const u8{
 };
 
 test "Rope basic tests" {
-    std.debug.print("\n", .{});
-
+    const RopeStack = Deque(Rope);
     const allocator = std.testing.allocator;
-    const rope0 = Rope.initEmpty(allocator);
-    std.debug.print("rope0 = {}\n", .{rope0});
 
-    var prev_rope = rope0;
-    // for (parts, 0..) |part, i| {
-    for (parts) |part| {
-        const rope = try prev_rope.insertAt(.{ .byte_offset = prev_rope.lenBytes() }, part);
-        prev_rope.deinit();
-        // std.debug.print("rope{} = {}\n", .{ i + 1, rope });
-        try std.testing.expect(rope.isBalanced());
-        prev_rope = rope;
+    var rope_stack = RopeStack.initEmpty(allocator);
+    defer {
+        while (!rope_stack.isEmpty()) {
+            const rope = rope_stack.pop() catch unreachable;
+            rope.deinit();
+        }
     }
-    prev_rope.deinit();
+
+    var rope = Rope.initEmpty(allocator);
+    rope_stack.push(rope);
+    for (parts, 0..) |part, i| {
+        rope = try rope.insertAt(.{ .byte_offset = rope.lenBytes() }, part);
+        rope_stack.push(rope);
+
+        // std.debug.print("rope{} = {}\n", .{ i + 1, rope });
+        var buf: [14]u8 = [_]u8{0} ** 14;
+        var filename = try std.fmt.bufPrint(&buf, "tmp/rope{d:0>2}.dot", .{i});
+        const f = try std.fs.cwd().createFile(filename, .{});
+        defer f.close();
+        try rope.writeDot(f.writer());
+
+        try std.testing.expect(rope.isBalanced());
+    }
+
+    const file = try std.fs.cwd().createFile("tmp/rope.dot", .{});
+    defer file.close();
+
+    rope = try rope.deleteAt(.{ .byte_offset = 2 }, 2);
+    rope_stack.push(rope);
+    // std.debug.print("rope{} = {}\n\n", .{ i + 1, rope });
+    // try rope.writeDot(file.writer());
+    try std.testing.expect(rope.isBalanced());
+
+    rope = try rope.deleteAt(.{ .byte_offset = 0 }, 1);
+    rope_stack.push(rope);
+    // std.debug.print("rope{} = {}\n\n", .{ i + 1, rope });
+    // try rope.writeDot(file.writer());
+    try std.testing.expect(rope.isBalanced());
+
+    rope = try rope.deleteAt(.{ .byte_offset = 2 }, 1);
+    rope_stack.push(rope);
+    // std.debug.print("rope{} = {}\n\n", .{ i + 1, rope });
+    try rope.writeDot(file.writer());
+    try std.testing.expect(rope.isBalanced());
+
+    rope = try rope.deleteAt(.{ .byte_offset = 10 }, 22);
+    rope_stack.push(rope);
+    // std.debug.print("rope{} = {}\n\n", .{ i + 1, rope });
+    try rope.writeDot(file.writer());
+    try std.testing.expect(rope.isBalanced());
 }
 
 test "Cursor basic tests" {
