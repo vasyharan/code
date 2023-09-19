@@ -1,4 +1,4 @@
-{ inputs, ... } @ args:
+{ inputs, lib, config, ... } @ args:
 let
   pkgs = import inputs.nixpkgs { 
     system = args.pkgs.stdenv.system; 
@@ -22,12 +22,12 @@ in {
   };
 
   packages = [
-    pkgs.gdb
-    # unstable.zls
     unstable.mdbook
     unstable.graphviz
     unstable.mdbook-graphviz
-
+  ] ++ lib.optionals (!config.container.isBuilding) [
+    pkgs.gdb
+    # unstable.zls
     (pkgs.stdenvNoCC.mkDerivation {
       name = "zls";
       src = pkgs.fetchFromGitHub {
