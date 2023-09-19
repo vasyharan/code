@@ -1,6 +1,7 @@
 {
     "recommendations": [
         "ziglang.vscode-zig",
-        "be5invis.toml"
+        "be5invis.toml",
+        "ms-vscode.cpptools"
     ]
 }
