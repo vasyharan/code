@@ -31,7 +31,8 @@ in {
   };
 
   packages = [
-    pkgs.gdb
+    # unstable.gdb
+    unstable.lldb
     # unstable.mdbook
     # unstable.graphviz
     # unstable.mdbook-graphviz
