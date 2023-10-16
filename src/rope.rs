@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 #[derive(Debug)]
-enum Error {
+pub enum Error {
     EOS,
 }
 
@@ -155,21 +155,25 @@ impl ToString for Node {
 }
 
 #[derive(Debug, Clone)]
-struct Rope {
+pub struct Rope {
     root: Rc<Node>,
 }
 
 impl Rope {
-    fn empty() -> Self {
-        let root = Rc::new(Node::new_leaf("".to_string()));
+    pub fn empty() -> Self {
+        Self::from_string("")
+    }
+
+    pub fn from_string(str: &str) -> Self {
+        let root = Rc::new(Node::new_leaf(str.to_string()));
         Self { root }
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.root.len()
     }
 
-    fn insert_at(&self, offset: usize, text: String) -> Result<Self, Error> {
+    pub fn insert_at(&self, offset: usize, text: String) -> Result<Self, Error> {
         if text.len() == 0 {
             return Ok(Self { root: self.root.clone() });
         }
@@ -181,7 +185,7 @@ impl Rope {
         Ok(Self { root })
     }
 
-    fn delete_at(&self, offset: usize, len: usize) -> Result<(Self, Self), Error> {
+    pub fn delete_at(&self, offset: usize, len: usize) -> Result<(Self, Self), Error> {
         if offset > self.root.len() || len + offset > self.root.len() {
             return Err(Error::EOS);
         }
@@ -219,7 +223,7 @@ impl Rope {
         }
     }
 
-    fn is_balanced(&self) -> bool {
+    pub fn is_balanced(&self) -> bool {
         match &self.root.is_balanced() {
             Ok(_) => true,
             _ => false,
@@ -237,6 +241,12 @@ impl Rope {
 impl ToString for Rope {
     fn to_string(&self) -> String {
         self.root.to_string()
+    }
+}
+
+impl From<&str> for Rope {
+    fn from(str: &str) -> Self {
+        Rope::from_string(str)
     }
 }
 
