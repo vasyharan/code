@@ -94,32 +94,20 @@ impl Node {
         }
     }
 
+    fn is_balanced(&self) -> bool {
+        self.black_height().is_ok()
+    }
+
     fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         match self {
             Branch { colour, left, right, .. } => {
-                write!(
-                    w,
-                    "\tn{:p}[shape=circle,color={},label=\"\"];\n",
-                    self, colour
-                )?;
+                write!(w, "\tn{:p}[shape=circle,color={},label=\"\"];\n", self, colour)?;
 
                 left.write_dot(w)?;
-                write!(
-                    w,
-                    "\tn{:p} -> n{:p}[label=\"{}\"];\n",
-                    self,
-                    left.as_ref(),
-                    left.len()
-                )?;
+                write!(w, "\tn{:p} -> n{:p}[label=\"{}\"];\n", self, left.as_ref(), left.len())?;
 
                 right.write_dot(w)?;
-                write!(
-                    w,
-                    "\tn{:p} -> n{:p}[label=\"{}\"];\n",
-                    self,
-                    right.as_ref(),
-                    right.len()
-                )?;
+                write!(w, "\tn{:p} -> n{:p}[label=\"{}\"];\n", self, right.as_ref(), right.len())?;
             }
             Leaf { val, .. } => {
                 write!(w, "\tn{:p}[shape=square,label=\"'{}'\"];\n", self, val)?;
@@ -199,14 +187,25 @@ impl Tree {
     }
 
     pub fn split(&self, at: usize) -> (Option<Tree>, Option<Tree>) {
-        match split(&self.0, at) {
+        let (left, right) = match split(&self.0, at) {
             (None, None, _) => (None, None),
             (None, Some((right, _)), _) => (None, Some(Tree(make_black(right)))),
             (Some((left, _)), None, _) => (Some(Tree(make_black(left))), None),
             (Some((left, _)), Some((right, _)), _) => {
                 (Some(Tree(make_black(left))), Some(Tree(make_black(right))))
             }
+        };
+
+        if cfg!(debug_assertions) {
+            if let Some(ref tree) = left {
+                debug_assert!(tree.is_balanced());
+            }
+            if let Some(ref tree) = right {
+                debug_assert!(tree.is_balanced());
+            }
         }
+
+        (left, right)
     }
 
     pub fn delete_at(&self, offset: usize, len: usize) -> (Tree, Tree) {
@@ -217,7 +216,35 @@ impl Tree {
         }
 
         let (left, right, _) = split(&self.0, offset);
+        let left = match left {
+            Some((ref node, height)) if node.colour() == NodeColour::Red => {
+                Some((make_black(node.clone()), height + 1))
+            }
+            x => x,
+        };
+        if cfg!(debug_assertions) {
+            if let Some((ref node, _)) = left {
+                debug_assert!(node.is_balanced());
+            }
+            if let Some((ref node, _)) = right {
+                debug_assert!(node.is_balanced());
+            }
+        }
         let (deleted, right, _) = split(&right.unwrap().0, len);
+        let right = match right {
+            Some((ref node, height)) if node.colour() == NodeColour::Red => {
+                Some((make_black(node.clone()), height + 1))
+            }
+            x => x,
+        };
+        if cfg!(debug_assertions) {
+            if let Some((ref node, _)) = deleted {
+                debug_assert!(node.is_balanced());
+            }
+            if let Some((ref node, _)) = right {
+                debug_assert!(node.is_balanced());
+            }
+        }
         let updated = match join(left, right) {
             None => Self::empty(),
             Some((root, _)) => Self(make_black(root)),
@@ -236,8 +263,8 @@ impl Tree {
         Ok(())
     }
 
-    pub fn black_height(&self) -> Result<usize, Error> {
-        self.0.black_height()
+    pub fn is_balanced(&self) -> bool {
+        self.0.is_balanced()
     }
 }
 
@@ -316,6 +343,10 @@ fn balance(colour: NodeColour, left: Rc<Node>, right: Rc<Node>) -> (Node, bool) 
 fn join_right(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, usize) {
     let (left, lheight) = left;
     let (right, rheight) = right;
+    debug_assert_eq!(lheight, black_height(left.as_ref()));
+    debug_assert_eq!(rheight, black_height(right.as_ref()));
+    // let lheight = black_height(left.as_ref());
+    // let rheight = black_height(right.as_ref());
     if lheight == rheight {
         if let Branch { colour, .. } = left.as_ref() {
             if *colour == NodeColour::Black {
@@ -341,6 +372,10 @@ fn join_right(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, u
 fn join_left(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, usize) {
     let (left, lheight) = left;
     let (right, rheight) = right;
+    debug_assert_eq!(lheight, black_height(left.as_ref()));
+    debug_assert_eq!(rheight, black_height(right.as_ref()));
+    // let lheight = black_height(left.as_ref());
+    // let rheight = black_height(right.as_ref());
     if lheight == rheight {
         if let Branch { colour, .. } = right.as_ref() {
             if *colour == NodeColour::Black {
@@ -372,6 +407,10 @@ fn join(
         (None, Some(right)) => Some(right.clone()),
         (Some(left), None) => Some(left.clone()),
         (Some((left, lheight)), Some((right, rheight))) => {
+            debug_assert_eq!(lheight, black_height(left.as_ref()));
+            debug_assert_eq!(rheight, black_height(right.as_ref()));
+            // let lheight = black_height(left.as_ref());
+            // let rheight = black_height(right.as_ref());
             if rheight > lheight {
                 Some(join_left((left, lheight), (right, rheight)))
             } else if lheight > rheight {
@@ -409,17 +448,31 @@ fn split(node: &Node, at: usize) -> (Option<(Rc<Node>, usize)>, Option<(Rc<Node>
         Node::Branch { colour, left, right, .. } => {
             if at <= left.len() {
                 let (split_left, split_right, lheight) = split(left, at);
+                // let lheight = black_height(right.as_ref());
                 let join_right = Some((right.clone(), lheight));
                 let split_right = join(split_right, join_right);
                 let height = lheight + (colour.black_height() as usize);
                 (split_left, split_right, height)
             } else {
                 let (split_left, split_right, rheight) = split(right, at - left.len());
+                // let rheight = black_height(left.as_ref());
                 let join_left = Some((left.clone(), rheight));
                 let split_left = join(join_left, split_left);
                 let height = rheight + (colour.black_height() as usize);
                 (split_left, split_right, height)
             }
+        }
+    }
+}
+
+fn black_height(node: &Node) -> usize {
+    match &node {
+        Node::Leaf { .. } => 0,
+        Node::Branch { colour, ref left, ref right, .. } => {
+            let lheight = black_height(left);
+            let rheight = black_height(right);
+            assert_eq!(lheight, rheight);
+            lheight + (colour.black_height() as usize)
         }
     }
 }

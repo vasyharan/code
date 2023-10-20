@@ -57,10 +57,7 @@ impl Rope {
     }
 
     pub fn is_balanced(&self) -> bool {
-        match &self.root.black_height() {
-            Ok(_) => true,
-            _ => false,
-        }
+        return self.root.is_balanced();
     }
 
     fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
@@ -138,15 +135,11 @@ mod tests {
         for (i, (at, p)) in parts.iter().enumerate() {
             rope = rope.insert_at(*at, p.to_string()).unwrap();
 
-            let mut file = std::fs::File::create(format!("target/tests/insert{:02}.dot", i))
-                .expect("create file");
-            rope.write_dot(&mut file).expect("write dot file");
-            assert!(
-                rope.is_balanced(),
-                "unbalanced when inserting {:?} at {}",
-                p,
-                at
-            );
+            // let mut file = std::fs::File::create(format!("target/tests/insert{:02}.dot", i))
+            //     .expect("create file");
+            // rope.write_dot(&mut file).expect("write dot file");
+
+            assert!(rope.is_balanced());
         }
         assert!(rope.is_balanced());
         assert_eq!(rope.to_string(), contents);
@@ -154,31 +147,32 @@ mod tests {
         for at in 0..rope.len() {
             let (split_left, split_right) = rope.split(at).expect("split rope");
 
-            let mut file = std::fs::File::create(format!("target/tests/split_left{:02}.dot", at))
-                .expect("create file");
-            split_left.write_dot(&mut file).expect("write dot file");
-            let mut file = std::fs::File::create(format!("target/tests/split_right{:02}.dot", at))
-                .expect("create file");
-            split_right.write_dot(&mut file).expect("write dot file");
+            // let mut file = std::fs::File::create(format!("target/tests/split_left{:02}.dot", at))
+            //     .expect("create file");
+            // split_left.write_dot(&mut file).expect("write dot file");
+            // let mut file = std::fs::File::create(format!("target/tests/split_right{:02}.dot", at))
+            //     .expect("create file");
+            // split_right.write_dot(&mut file).expect("write dot file");
 
             assert_eq!(split_left.to_string(), contents[..at]);
             assert_eq!(split_right.to_string(), contents[at..]);
 
-            assert!(split_left.is_balanced());
-            assert!(split_right.is_balanced());
+            assert!(split_left.is_balanced(), "unbalanced left; split at {}", at);
+            assert!(split_right.is_balanced(), "unbalaced right; split at {}", at);
         }
 
+        // delete from start of rope
         (1..=rope.len()).fold(rope.clone(), |rope, i| {
             let (updated, deleted) = rope.delete_at(0, 1).expect("delete rope");
 
-            let mut file =
-                std::fs::File::create(format!("target/tests/delete_updated{:02}.dot", i))
-                    .expect("create file");
-            updated.write_dot(&mut file).expect("write dot file");
-            let mut file =
-                std::fs::File::create(format!("target/tests/delete_deleted{:02}.dot", i))
-                    .expect("create file");
-            deleted.write_dot(&mut file).expect("write dot file");
+            // let mut file =
+            //     std::fs::File::create(format!("target/tests/delete_updated{:02}.dot", i))
+            //         .expect("create file");
+            // updated.write_dot(&mut file).expect("write dot file");
+            // let mut file =
+            //     std::fs::File::create(format!("target/tests/delete_deleted{:02}.dot", i))
+            //         .expect("create file");
+            // deleted.write_dot(&mut file).expect("write dot file");
 
             assert_eq!(updated.to_string(), contents[i..]);
             assert_eq!(deleted.to_string().as_bytes(), [contents.as_bytes()[i - 1]]);
@@ -187,50 +181,53 @@ mod tests {
             updated
         });
 
+        // delete from end of string
         (1..=rope.len()).fold(rope.clone(), |rope, i| {
             let (updated, deleted) = rope.delete_at(rope.len() - 1, 1).expect("delete rope");
 
-            let mut file =
-                std::fs::File::create(format!("target/tests/delete_updated{:02}.dot", i))
-                    .expect("create file");
-            updated.write_dot(&mut file).expect("write dot file");
-            let mut file =
-                std::fs::File::create(format!("target/tests/delete_deleted{:02}.dot", i))
-                    .expect("create file");
-            deleted.write_dot(&mut file).expect("write dot file");
+            // let mut file =
+            //     std::fs::File::create(format!("target/tests/delete_updated{:02}.dot", i))
+            //         .expect("create file");
+            // updated.write_dot(&mut file).expect("write dot file");
+            // let mut file =
+            //     std::fs::File::create(format!("target/tests/delete_deleted{:02}.dot", i))
+            //         .expect("create file");
+            // deleted.write_dot(&mut file).expect("write dot file");
 
             assert_eq!(updated.to_string(), contents[..(rope.len() - 1)]);
             assert_eq!(
                 deleted.to_string(),
                 String::from_utf8(vec![contents.as_bytes()[rope.len() - 1]]).expect("utf8 string")
             );
-            assert!(updated.is_balanced());
-            assert!(deleted.is_balanced());
+            assert!(updated.is_balanced(), "unbalanced left node; delete end {}", i);
+            assert!(deleted.is_balanced(), "unbalanced right node; delete end {}", i);
             updated
         });
 
-        // rope = rope.delete_at(Position::ByteOffset(2), 2).unwrap();
-        // let mut file = std::fs::File::create("target/tests/delete00.dot").expect("create file");
-        // rope.write_dot(&mut file).expect("write dot file");
-        // assert_eq!(rope.to_string(), "Lom ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.");
-        // assert!(rope.is_balanced());
+        // delete from middle of string
+        (1..=rope.len()).fold(rope.clone(), |rope, i| {
+            let middle = rope.len() / 2;
+            let (updated, deleted) = rope.delete_at(middle, 1).expect("delete rope");
 
-        // rope = rope.delete_at(Position::ByteOffset(0), 1).unwrap();
-        // let mut file = std::fs::File::create("target/tests/delete01.dot").expect("create file");
-        // rope.write_dot(&mut file).expect("write dot file");
-        // assert_eq!(rope.to_string(), "om ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.");
-        // assert!(rope.is_balanced());
+            // let mut file =
+            //     std::fs::File::create(format!("target/tests/delete_updated{:02}.dot", i))
+            //         .expect("create file");
+            // updated.write_dot(&mut file).expect("write dot file");
+            // let mut file =
+            //     std::fs::File::create(format!("target/tests/delete_deleted{:02}.dot", i))
+            //         .expect("create file");
+            // deleted.write_dot(&mut file).expect("write dot file");
 
-        // rope = rope.delete_at(Position::ByteOffset(2), 1).unwrap();
-        // let mut file = std::fs::File::create("target/tests/delete02.dot").expect("create file");
-        // rope.write_dot(&mut file).expect("write dot file");
-        // assert_eq!(rope.to_string(), "omipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.");
-        // assert!(rope.is_balanced());
-
-        // rope = rope.delete_at(Position::ByteOffset(10), 22).unwrap();
-        // let mut file = std::fs::File::create("target/tests/delete03.dot").expect("create file");
-        // rope.write_dot(&mut file).expect("write dot file");
-        // assert_eq!(rope.to_string(), "omipsum dour adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.");
-        // assert!(rope.is_balanced());
+            let updated_str = updated.to_string();
+            assert_eq!(updated_str[..middle], contents[..middle]);
+            assert_eq!(updated_str[middle..], contents[(middle + i)..]);
+            // assert_eq!(
+            //     deleted.to_string(),
+            //     String::from_utf8(vec![contents.as_bytes()[middle]]).expect("utf8 string")
+            // );
+            assert!(updated.is_balanced(), "unbalanced left node; delete middle {}", i);
+            assert!(deleted.is_balanced(), "unbalanced right node; delete middle {}", i);
+            updated
+        });
     }
 }
