@@ -1,5 +1,8 @@
 use std::rc::Rc;
-use Node::{Branch, Leaf};
+
+use crate::rope::block::BlockRange;
+use bstr::{BString, ByteVec};
+use Node::{Branch, Empty, Leaf};
 
 #[derive(Debug)]
 pub enum Error {
@@ -41,40 +44,46 @@ enum Node {
         len: usize,
     },
     Leaf {
-        val: String,
-        len: usize,
+        // val: String,
+        // len: usize,
+        block_ref: BlockRange,
     },
+    Empty,
 }
 
 impl Node {
+    fn empty() -> Self {
+        Empty
+    }
+
     fn new_branch(colour: NodeColour, left: Rc<Node>, right: Rc<Node>) -> Self {
         let len = left.len() + right.len();
         Branch { colour, left, right, len }
     }
 
-    fn new_leaf(val: String) -> Self {
-        let len = val.len();
-        Leaf { val, len }
+    fn new_leaf(val: BlockRange) -> Self {
+        Leaf { block_ref: val }
     }
 
     fn len(&self) -> usize {
         match &self {
             Branch { len, .. } => *len,
-            Leaf { len, .. } => *len,
+            Leaf { block_ref, .. } => block_ref.len(),
+            Empty => 0,
         }
     }
 
     fn colour(&self) -> NodeColour {
         match &self {
             Branch { colour, .. } => *colour,
-            Leaf { .. } => NodeColour::Black,
+            Empty | Leaf { .. } => NodeColour::Black,
         }
     }
 
     fn black_height(&self) -> Result<usize, Error> {
         match &self {
-            Node::Leaf { .. } => Ok(0),
-            Node::Branch { colour, left, right, .. } => {
+            Empty | Leaf { .. } => Ok(0),
+            Branch { colour, left, right, .. } => {
                 if *colour == NodeColour::Red {
                     if let Branch { colour: NodeColour::Red, .. } = left.as_ref() {
                         return Err(Error::ConsecutiveRed);
@@ -109,22 +118,25 @@ impl Node {
                 right.write_dot(w)?;
                 write!(w, "\tn{:p} -> n{:p}[label=\"{}\"];\n", self, right.as_ref(), right.len())?;
             }
-            Leaf { val, .. } => {
-                write!(w, "\tn{:p}[shape=square,label=\"'{}'\"];\n", self, val)?;
+            Leaf { block_ref, .. } => {
+                let s = String::from_utf8(block_ref.as_bytes().into()).unwrap();
+                write!(w, "\tn{:p}[shape=square,label=\"'{}'\"];\n", self, s)?;
+            }
+            Empty => {
+                write!(w, "\tn{:p}[shape=square,label=\"''\"];\n", self)?;
             }
         }
         Ok(())
     }
-}
 
-impl ToString for Node {
-    fn to_string(&self) -> String {
+    fn to_bstring(&self) -> BString {
         match self {
-            Leaf { val, .. } => val.clone(),
+            Empty => b"".into(),
+            Leaf { block_ref, .. } => block_ref.as_bytes().into(),
             Branch { left, right, .. } => {
-                let mut s = left.to_string();
-                s.push_str(&right.to_string());
-                s
+                let mut bstr = left.to_bstring();
+                bstr.push_str(right.to_bstring());
+                bstr
             }
         }
     }
@@ -135,22 +147,24 @@ pub struct Tree(Rc<Node>);
 
 impl Tree {
     pub fn empty() -> Self {
-        Self::from_str("")
-    }
-
-    pub fn from_str(str: &str) -> Self {
-        let root = Rc::new(Node::new_leaf(str.to_owned()));
+        let root = Rc::new(Node::empty());
         Self(root)
     }
+
+    // pub fn from_str(str: &str) -> Self {
+    //     let root = Rc::new(Node::new_leaf(str.to_owned()));
+    //     Self(root)
+    // }
 
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
-    pub fn insert_at(&self, offset: usize, text: String) -> Self {
-        fn rec(node: &Rc<Node>, offset: usize, text: String) -> Node {
+    pub fn insert_at(&self, offset: usize, text: BlockRange) -> Self {
+        fn rec(node: &Rc<Node>, offset: usize, text: BlockRange) -> Node {
             match node.as_ref() {
-                Leaf { val, .. } => {
+                Empty => Node::new_leaf(text),
+                Leaf { block_ref, .. } => {
                     if node.len() == 0 {
                         Node::new_leaf(text)
                     } else if offset == 0 {
@@ -160,9 +174,9 @@ impl Tree {
                         let right = Rc::new(Node::new_leaf(text));
                         Node::new_branch(NodeColour::Red, node.clone(), right)
                     } else {
-                        let left = Rc::new(Node::new_leaf(val[..offset].to_string()));
+                        let left = Rc::new(Node::new_leaf(block_ref.substr(..offset)));
                         let rl = Rc::new(Node::new_leaf(text));
-                        let rr = Rc::new(Node::new_leaf(val[offset..].to_string()));
+                        let rr = Rc::new(Node::new_leaf(block_ref.substr(offset..)));
                         let right = Rc::new(Node::new_branch(NodeColour::Red, rl, rr));
                         Node::new_branch(NodeColour::Red, left, right)
                     }
@@ -266,17 +280,15 @@ impl Tree {
     pub fn is_balanced(&self) -> bool {
         self.0.is_balanced()
     }
+
+    pub fn to_bstring(&self) -> BString {
+        self.0.to_bstring()
+    }
 }
 
 impl From<Node> for Tree {
     fn from(node: Node) -> Self {
         Self(Rc::new(node))
-    }
-}
-
-impl ToString for Tree {
-    fn to_string(&self) -> String {
-        self.0.to_string()
     }
 }
 
@@ -431,21 +443,22 @@ fn join(
 
 fn split(node: &Node, at: usize) -> (Option<(Rc<Node>, usize)>, Option<(Rc<Node>, usize)>, usize) {
     match node {
-        Node::Leaf { val, .. } => {
+        Empty => (None, None, 0),
+        Leaf { block_ref, .. } => {
             // TODO: stop making copies if possible
             let split_left = if at == 0 {
                 None
             } else {
-                Some((Rc::new(Node::new_leaf(val[..at].to_string())), 0))
+                Some((Rc::new(Node::new_leaf(block_ref.substr(..at))), 0))
             };
-            let split_right = if at == val.len() {
+            let split_right = if at == block_ref.len() {
                 None
             } else {
-                Some((Rc::new(Node::new_leaf(val[at..].to_string())), 0))
+                Some((Rc::new(Node::new_leaf(block_ref.substr(at..))), 0))
             };
             (split_left, split_right, 0)
         }
-        Node::Branch { colour, left, right, .. } => {
+        Branch { colour, left, right, .. } => {
             if at <= left.len() {
                 let (split_left, split_right, lheight) = split(left, at);
                 // let lheight = black_height(right.as_ref());
@@ -467,8 +480,8 @@ fn split(node: &Node, at: usize) -> (Option<(Rc<Node>, usize)>, Option<(Rc<Node>
 
 fn black_height(node: &Node) -> usize {
     match &node {
-        Node::Leaf { .. } => 0,
-        Node::Branch { colour, ref left, ref right, .. } => {
+        Empty | Leaf { .. } => 0,
+        Branch { colour, ref left, ref right, .. } => {
             let lheight = black_height(left);
             let rheight = black_height(right);
             assert_eq!(lheight, rheight);

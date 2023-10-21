@@ -1,5 +1,9 @@
+pub mod block;
 mod tree;
+use bstr::BString;
 use tree::Tree;
+
+use self::block::BlockRange;
 
 #[derive(Debug)]
 pub enum Error {
@@ -13,18 +17,14 @@ pub struct Rope {
 
 impl Rope {
     pub fn empty() -> Self {
-        Self::from_string("")
-    }
-
-    pub fn from_string(str: &str) -> Self {
-        Self { root: Tree::from_str(str) }
+        Self { root: Tree::empty() }
     }
 
     pub fn len(&self) -> usize {
         self.root.len()
     }
 
-    pub fn insert_at(&self, offset: usize, text: String) -> Result<Self, Error> {
+    pub fn insert_at(&self, offset: usize, text: BlockRange) -> Result<Self, Error> {
         if text.len() == 0 {
             return Ok(Self { root: self.root.clone() });
         }
@@ -36,11 +36,15 @@ impl Rope {
     }
 
     pub fn delete_at(&self, offset: usize, len: usize) -> Result<(Self, Self), Error> {
-        if offset > self.root.len() || len + offset > self.root.len() {
+        if offset > self.root.len() {
             return Err(Error::EOS);
         }
-        match self.root.delete_at(offset, len) {
-            (left, right) => Ok((Self { root: (left) }, Self { root: (right) })),
+        match len.checked_add(offset) {
+            None => return Err(Error::EOS),
+            Some(x) if x > self.root.len() => return Err(Error::EOS),
+            _ => match self.root.delete_at(offset, len) {
+                (left, right) => Ok((Self { root: (left) }, Self { root: (right) })),
+            },
         }
     }
 
@@ -60,26 +64,21 @@ impl Rope {
         return self.root.is_balanced();
     }
 
+    pub fn to_bstring(&self) -> BString {
+        self.root.to_bstring()
+    }
+
     fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         self.root.write_dot(w)
     }
 }
 
-impl ToString for Rope {
-    fn to_string(&self) -> String {
-        self.root.to_string()
-    }
-}
-
-impl From<&str> for Rope {
-    fn from(str: &str) -> Self {
-        Rope::from_string(str)
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use bstr::BStr;
+
     use super::*;
+    use crate::rope::block::Buffer;
 
     #[test]
     fn basic_tests() {
@@ -122,18 +121,22 @@ mod tests {
             (172, "us"),
             (186, "\n"),
         ];
-        let contents = "This is the song that never ends.\n\
+        let contents: BString = "This is the song that never ends.\n\
             It just goes 'round and 'round, my friends.\n\
             Some people started singing it\n\
             not knowing what it was;\n\
             and they continue singing it forever just because...\n\
-        ";
+        "
+        .into();
 
         let mut rope = Rope::empty();
         assert!(rope.is_balanced());
 
+        let mut buffer = Buffer::new();
         for (i, (at, p)) in parts.iter().enumerate() {
-            rope = rope.insert_at(*at, p.to_string()).unwrap();
+            let (block, w) = buffer.append(p.as_bytes()).unwrap();
+            assert_eq!(w, p.len());
+            rope = rope.insert_at(*at, block).unwrap();
 
             // let mut file = std::fs::File::create(format!("target/tests/insert{:02}.dot", i))
             //     .expect("create file");
@@ -142,7 +145,7 @@ mod tests {
             assert!(rope.is_balanced());
         }
         assert!(rope.is_balanced());
-        assert_eq!(rope.to_string(), contents);
+        assert_eq!(rope.to_bstring(), contents);
 
         for at in 0..rope.len() {
             let (split_left, split_right) = rope.split(at).expect("split rope");
@@ -154,8 +157,8 @@ mod tests {
             //     .expect("create file");
             // split_right.write_dot(&mut file).expect("write dot file");
 
-            assert_eq!(split_left.to_string(), contents[..at]);
-            assert_eq!(split_right.to_string(), contents[at..]);
+            assert_eq!(split_left.to_bstring(), BString::from(&contents[..at]));
+            assert_eq!(split_right.to_bstring(), BString::from(&contents[at..]));
 
             assert!(split_left.is_balanced(), "unbalanced left; split at {}", at);
             assert!(split_right.is_balanced(), "unbalaced right; split at {}", at);
@@ -174,8 +177,8 @@ mod tests {
             //         .expect("create file");
             // deleted.write_dot(&mut file).expect("write dot file");
 
-            assert_eq!(updated.to_string(), contents[i..]);
-            assert_eq!(deleted.to_string().as_bytes(), [contents.as_bytes()[i - 1]]);
+            assert_eq!(updated.to_bstring(), BString::from(&contents[i..]));
+            assert_eq!(deleted.to_bstring(), BString::from([contents[i - 1]]));
             assert!(updated.is_balanced());
             assert!(deleted.is_balanced());
             updated
@@ -194,11 +197,8 @@ mod tests {
             //         .expect("create file");
             // deleted.write_dot(&mut file).expect("write dot file");
 
-            assert_eq!(updated.to_string(), contents[..(rope.len() - 1)]);
-            assert_eq!(
-                deleted.to_string(),
-                String::from_utf8(vec![contents.as_bytes()[rope.len() - 1]]).expect("utf8 string")
-            );
+            assert_eq!(updated.to_bstring(), BString::from(&contents[..(rope.len() - 1)]));
+            assert_eq!(deleted.to_bstring(), BString::from([contents[rope.len() - 1]]));
             assert!(updated.is_balanced(), "unbalanced left node; delete end {}", i);
             assert!(deleted.is_balanced(), "unbalanced right node; delete end {}", i);
             updated
@@ -218,9 +218,9 @@ mod tests {
             //         .expect("create file");
             // deleted.write_dot(&mut file).expect("write dot file");
 
-            let updated_str = updated.to_string();
-            assert_eq!(updated_str[..middle], contents[..middle]);
-            assert_eq!(updated_str[middle..], contents[(middle + i)..]);
+            let updated_str = updated.to_bstring();
+            assert_eq!(updated_str[..middle], BString::from(&contents[..middle]));
+            assert_eq!(updated_str[middle..], BString::from(&contents[(middle + i)..]));
             // assert_eq!(
             //     deleted.to_string(),
             //     String::from_utf8(vec![contents.as_bytes()[middle]]).expect("utf8 string")

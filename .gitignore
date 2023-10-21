@@ -1,6 +1,6 @@
 .devenv/
 .direnv/
-tmp/
+.vscode/
 
 # Added by cargo
 /target
