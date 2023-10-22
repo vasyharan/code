@@ -3,7 +3,7 @@
 extern crate toku;
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use toku::rope::block::Buffer;
+use toku::rope::Buffer;
 use toku::rope::Rope;
 
 #[derive(Arbitrary, Clone, Debug)]

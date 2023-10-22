@@ -1,9 +1,9 @@
-pub mod block;
+mod block;
 mod tree;
+pub use self::block::BlockRange;
+pub use self::block::Buffer;
+use self::tree::Tree;
 use bstr::BString;
-use tree::Tree;
-
-use self::block::BlockRange;
 
 #[derive(Debug)]
 pub enum Error {
