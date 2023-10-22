@@ -75,8 +75,6 @@ impl Rope {
 
 #[cfg(test)]
 mod tests {
-    use bstr::BStr;
-
     use super::*;
     use crate::rope::block::Buffer;
 
@@ -133,7 +131,7 @@ mod tests {
         assert!(rope.is_balanced());
 
         let mut buffer = Buffer::new();
-        for (i, (at, p)) in parts.iter().enumerate() {
+        for (_i, (at, p)) in parts.iter().enumerate() {
             let (block, w) = buffer.append(p.as_bytes()).unwrap();
             assert_eq!(w, p.len());
             rope = rope.insert_at(*at, block).unwrap();

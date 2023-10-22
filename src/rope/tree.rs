@@ -201,25 +201,14 @@ impl Tree {
     }
 
     pub fn split(&self, at: usize) -> (Option<Tree>, Option<Tree>) {
-        let (left, right) = match split(&self.0, at) {
-            (None, None, _) => (None, None),
-            (None, Some((right, _)), _) => (None, Some(Tree(make_black(right)))),
-            (Some((left, _)), None, _) => (Some(Tree(make_black(left))), None),
-            (Some((left, _)), Some((right, _)), _) => {
-                (Some(Tree(make_black(left))), Some(Tree(make_black(right))))
-            }
-        };
-
-        if cfg!(debug_assertions) {
-            if let Some(ref tree) = left {
-                debug_assert!(tree.is_balanced());
-            }
-            if let Some(ref tree) = right {
-                debug_assert!(tree.is_balanced());
-            }
+        let (left, right) = split(&self.0, at);
+        debug_assert_split_balanced("split", &self.0, &left, &right);
+        match (left, right) {
+            (None, None) => (None, None),
+            (None, Some((right, _))) => (None, Some(Tree(right))),
+            (Some((left, _)), None) => (Some(Tree(left)), None),
+            (Some((left, _)), Some((right, _))) => (Some(Tree(left)), Some(Tree(right))),
         }
-
-        (left, right)
     }
 
     pub fn delete_at(&self, offset: usize, len: usize) -> (Tree, Tree) {
@@ -229,36 +218,11 @@ impl Tree {
             return (updated, deleted);
         }
 
-        let (left, right, _) = split(&self.0, offset);
-        let left = match left {
-            Some((ref node, height)) if node.colour() == NodeColour::Red => {
-                Some((make_black(node.clone()), height + 1))
-            }
-            x => x,
-        };
-        if cfg!(debug_assertions) {
-            if let Some((ref node, _)) = left {
-                debug_assert!(node.is_balanced());
-            }
-            if let Some((ref node, _)) = right {
-                debug_assert!(node.is_balanced());
-            }
-        }
-        let (deleted, right, _) = split(&right.unwrap().0, len);
-        let right = match right {
-            Some((ref node, height)) if node.colour() == NodeColour::Red => {
-                Some((make_black(node.clone()), height + 1))
-            }
-            x => x,
-        };
-        if cfg!(debug_assertions) {
-            if let Some((ref node, _)) = deleted {
-                debug_assert!(node.is_balanced());
-            }
-            if let Some((ref node, _)) = right {
-                debug_assert!(node.is_balanced());
-            }
-        }
+        let (left, right) = split(&self.0, offset);
+        debug_assert_split_balanced("delete_split1", &self.0, &left, &right);
+        let (deleted, right) = split(&right.unwrap().0, len);
+        debug_assert_split_balanced("delete_split2", &self.0, &left, &right);
+
         let updated = match join(left, right) {
             None => Self::empty(),
             Some((root, _)) => Self(make_black(root)),
@@ -357,8 +321,6 @@ fn join_right(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, u
     let (right, rheight) = right;
     debug_assert_eq!(lheight, black_height(left.as_ref()));
     debug_assert_eq!(rheight, black_height(right.as_ref()));
-    // let lheight = black_height(left.as_ref());
-    // let rheight = black_height(right.as_ref());
     if lheight == rheight {
         if let Branch { colour, .. } = left.as_ref() {
             if *colour == NodeColour::Black {
@@ -386,8 +348,6 @@ fn join_left(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, us
     let (right, rheight) = right;
     debug_assert_eq!(lheight, black_height(left.as_ref()));
     debug_assert_eq!(rheight, black_height(right.as_ref()));
-    // let lheight = black_height(left.as_ref());
-    // let rheight = black_height(right.as_ref());
     if lheight == rheight {
         if let Branch { colour, .. } = right.as_ref() {
             if *colour == NodeColour::Black {
@@ -441,41 +401,59 @@ fn join(
     }
 }
 
-fn split(node: &Node, at: usize) -> (Option<(Rc<Node>, usize)>, Option<(Rc<Node>, usize)>, usize) {
-    match node {
-        Empty => (None, None, 0),
-        Leaf { block_ref, .. } => {
-            // TODO: stop making copies if possible
-            let split_left = if at == 0 {
-                None
-            } else {
-                Some((Rc::new(Node::new_leaf(block_ref.substr(..at))), 0))
-            };
-            let split_right = if at == block_ref.len() {
-                None
-            } else {
-                Some((Rc::new(Node::new_leaf(block_ref.substr(at..))), 0))
-            };
-            (split_left, split_right, 0)
-        }
-        Branch { colour, left, right, .. } => {
-            if at <= left.len() {
-                let (split_left, split_right, lheight) = split(left, at);
-                // let lheight = black_height(right.as_ref());
-                let join_right = Some((right.clone(), lheight));
-                let split_right = join(split_right, join_right);
-                let height = lheight + (colour.black_height() as usize);
-                (split_left, split_right, height)
-            } else {
-                let (split_left, split_right, rheight) = split(right, at - left.len());
-                // let rheight = black_height(left.as_ref());
-                let join_left = Some((left.clone(), rheight));
-                let split_left = join(join_left, split_left);
-                let height = rheight + (colour.black_height() as usize);
-                (split_left, split_right, height)
+fn split(node: &Node, at: usize) -> (Option<(Rc<Node>, usize)>, Option<(Rc<Node>, usize)>) {
+    fn split_rec(
+        node: &Node,
+        at: usize,
+    ) -> (Option<(Rc<Node>, usize)>, Option<(Rc<Node>, usize)>, usize) {
+        match node {
+            Empty => (None, None, 0),
+            Leaf { block_ref, .. } => {
+                // TODO: stop making copies if possible
+                let split_left = if at == 0 {
+                    None
+                } else {
+                    Some((Rc::new(Node::new_leaf(block_ref.substr(..at))), 0))
+                };
+                let split_right = if at == block_ref.len() {
+                    None
+                } else {
+                    Some((Rc::new(Node::new_leaf(block_ref.substr(at..))), 0))
+                };
+                (split_left, split_right, 0)
+            }
+            Branch { colour, left, right, .. } => {
+                if at <= left.len() {
+                    let (split_left, split_right, lheight) = split_rec(left, at);
+                    let join_right = Some((right.clone(), lheight));
+                    let split_right = join(split_right, join_right);
+                    let height = lheight + (colour.black_height() as usize);
+                    (split_left, split_right, height)
+                } else {
+                    let (split_left, split_right, rheight) = split_rec(right, at - left.len());
+                    let join_left = Some((left.clone(), rheight));
+                    let split_left = join(join_left, split_left);
+                    let height = rheight + (colour.black_height() as usize);
+                    (split_left, split_right, height)
+                }
             }
         }
     }
+
+    let (left, right, _) = split_rec(node, at);
+    let left = match left {
+        Some((ref node, height)) if node.colour() == NodeColour::Red => {
+            Some((make_black(node.clone()), height + 1))
+        }
+        x => x,
+    };
+    let right = match right {
+        Some((ref node, height)) if node.colour() == NodeColour::Red => {
+            Some((make_black(node.clone()), height + 1))
+        }
+        x => x,
+    };
+    (left, right)
 }
 
 fn black_height(node: &Node) -> usize {
@@ -486,6 +464,53 @@ fn black_height(node: &Node) -> usize {
             let rheight = black_height(right);
             assert_eq!(lheight, rheight);
             lheight + (colour.black_height() as usize)
+        }
+    }
+}
+
+fn debug_assert_split_balanced(
+    prefix: &str,
+    pre_split: &Rc<Node>,
+    split_left: &Option<(Rc<Node>, usize)>,
+    split_right: &Option<(Rc<Node>, usize)>,
+) {
+    if cfg!(debug_assertions) {
+        let left_bal = if let Some((ref node, _)) = split_left {
+            node.is_balanced()
+        } else {
+            true
+        };
+        let right_bal = if let Some((ref node, _)) = split_right {
+            node.is_balanced()
+        } else {
+            true
+        };
+
+        if !left_bal || !right_bal {
+            std::fs::create_dir_all("target/assert/").expect("create directory");
+            let mut file = std::fs::File::create(format!("target/assert/{}_pre_split.dot", prefix))
+                .expect("create file");
+            Tree(pre_split.clone())
+                .write_dot(&mut file)
+                .expect("write dot file");
+
+            if let Some((ref node, _)) = split_left {
+                let mut file =
+                    std::fs::File::create(format!("target/assert/{}_split_left.dot", prefix))
+                        .expect("create file");
+                Tree(node.clone())
+                    .write_dot(&mut file)
+                    .expect("write dot file");
+            }
+            if let Some((ref node, _)) = split_right {
+                let mut file =
+                    std::fs::File::create(format!("target/assert/{}_split_right.dot", prefix))
+                        .expect("create file");
+                Tree(node.clone())
+                    .write_dot(&mut file)
+                    .expect("write dot file");
+            }
+            assert!(false, "left/right tree unbalanced post split");
         }
     }
 }
