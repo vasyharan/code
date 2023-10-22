@@ -75,6 +75,8 @@ impl Rope {
 
 #[cfg(test)]
 mod tests {
+    use bstr::ByteSlice;
+
     use super::*;
     use crate::rope::block::Buffer;
 
@@ -155,8 +157,8 @@ mod tests {
             //     .expect("create file");
             // split_right.write_dot(&mut file).expect("write dot file");
 
-            assert_eq!(split_left.to_bstring(), BString::from(&contents[..at]));
-            assert_eq!(split_right.to_bstring(), BString::from(&contents[at..]));
+            assert_eq!(split_left.to_bstring(), contents[..at].as_bstr());
+            assert_eq!(split_right.to_bstring(), contents[at..].as_bstr());
 
             assert!(split_left.is_balanced(), "unbalanced left; split at {}", at);
             assert!(split_right.is_balanced(), "unbalaced right; split at {}", at);
@@ -175,8 +177,8 @@ mod tests {
             //         .expect("create file");
             // deleted.write_dot(&mut file).expect("write dot file");
 
-            assert_eq!(updated.to_bstring(), BString::from(&contents[i..]));
-            assert_eq!(deleted.to_bstring(), BString::from([contents[i - 1]]));
+            assert_eq!(updated.to_bstring(), contents[i..].as_bstr());
+            assert_eq!(deleted.to_bstring(), [contents[i - 1]].as_bstr());
             assert!(updated.is_balanced());
             assert!(deleted.is_balanced());
             updated
@@ -195,8 +197,8 @@ mod tests {
             //         .expect("create file");
             // deleted.write_dot(&mut file).expect("write dot file");
 
-            assert_eq!(updated.to_bstring(), BString::from(&contents[..(rope.len() - 1)]));
-            assert_eq!(deleted.to_bstring(), BString::from([contents[rope.len() - 1]]));
+            assert_eq!(updated.to_bstring(), contents[..(rope.len() - 1)].as_bstr());
+            assert_eq!(deleted.to_bstring(), [contents[rope.len() - 1]].as_bstr());
             assert!(updated.is_balanced(), "unbalanced left node; delete end {}", i);
             assert!(deleted.is_balanced(), "unbalanced right node; delete end {}", i);
             updated
@@ -217,8 +219,8 @@ mod tests {
             // deleted.write_dot(&mut file).expect("write dot file");
 
             let updated_str = updated.to_bstring();
-            assert_eq!(updated_str[..middle], BString::from(&contents[..middle]));
-            assert_eq!(updated_str[middle..], BString::from(&contents[(middle + i)..]));
+            assert_eq!(updated_str[..middle].as_bstr(), contents[..middle].as_bstr());
+            assert_eq!(updated_str[middle..].as_bstr(), contents[(middle + i)..].as_bstr());
             // assert_eq!(
             //     deleted.to_string(),
             //     String::from_utf8(vec![contents.as_bytes()[middle]]).expect("utf8 string")
@@ -226,6 +228,81 @@ mod tests {
             assert!(updated.is_balanced(), "unbalanced left node; delete middle {}", i);
             assert!(deleted.is_balanced(), "unbalanced right node; delete middle {}", i);
             updated
+        });
+    }
+
+    #[test]
+    fn random_tests() {
+        use rand::{distributions::Standard, prelude::Distribution, Rng, RngCore, SeedableRng};
+        let rope = Rope::empty();
+        let mut bytes = [0; 8192];
+        let mut buffer = Buffer::new();
+        let mut rng = rand::rngs::SmallRng::from_entropy();
+
+        enum Operation {
+            Insert,
+            Delete,
+        }
+
+        impl Distribution<Operation> for Standard {
+            fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Operation {
+                match rng.gen_range(0..2) {
+                    0 => Operation::Insert,
+                    1 => Operation::Delete,
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        (0..1_000_000).fold(rope.clone(), |rope, i| {
+            let op: Operation = rng.gen();
+            if rope.len() == 0 {
+                let len = bytes.len();
+                let mut buf = &mut bytes[0..(rng.gen_range(0..len))];
+                rng.fill_bytes(buf);
+
+                let mut at = 0;
+                let mut rope = rope;
+                while buf.len() > 0 {
+                    let (block, written) = buffer.append(buf).expect("buffer append");
+                    buf = &mut buf[0..written];
+                    rope = rope.insert_at(at, block).expect("rope insert");
+                    at += written;
+                }
+                return rope;
+            }
+            match op {
+                Operation::Insert => {
+                    let mut at = rng.gen_range(0..rope.len());
+                    let len = bytes.len();
+                    let mut buf = &mut bytes[0..(rng.gen_range(0..len))];
+                    rng.fill_bytes(buf);
+
+                    let mut rope = rope;
+                    while buf.len() > 0 {
+                        let (block, written) = buffer.append(buf).expect("buffer append");
+                        buf = &mut buf[0..written];
+                        rope = rope.insert_at(at, block).expect("rope insert");
+                        at += written;
+                    }
+                    assert!(rope.is_balanced(), "unbalanced left node; delete middle {}", i);
+                    rope
+                }
+                Operation::Delete => {
+                    let at = rng.gen_range(0..rope.len());
+                    let len = rng.gen_range(0..(rope.len() - at));
+                    let (updated, deleted) = rope.delete_at(at, len).expect("rope delete");
+                    let deleted_str = deleted.to_bstring();
+                    let updated_str = updated.to_bstring();
+                    let original_str = rope.to_bstring();
+                    assert_eq!(updated_str[..at], BString::from(&original_str[..at]));
+                    assert_eq!(updated_str[at..], BString::from(&original_str[(at + len)..]));
+                    assert_eq!(deleted_str, BString::from(&original_str[at..(at + len)]));
+                    assert!(updated.is_balanced(), "unbalanced left node; delete middle {}", i);
+                    assert!(deleted.is_balanced(), "unbalanced right node; delete middle {}", i);
+                    updated
+                }
+            }
         });
     }
 }
