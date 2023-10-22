@@ -1,3 +1,4 @@
 tasks:
-    - init: rustup show
+    - before: cargo install cargo-fuzz
+      init: rustup show
       command: cargo watch -x check -x test
