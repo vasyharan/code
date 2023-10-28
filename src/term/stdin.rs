@@ -126,7 +126,7 @@ impl<T> Clone for Locked<T> {
 #[derive(Debug)]
 enum State {
     Idle(Option<Buf>),
-    Busy(Option<Buf>, std::task::Waker),
+    Busy(Option<Buf>, Option<std::task::Waker>),
     Ready(Option<Buf>, Option<io::Result<usize>>),
     Dropped,
 }
@@ -145,35 +145,42 @@ impl AsyncStdin {
     }
 
     fn spawn_stdin_read(state_lock: Locked<State>) -> JoinHandle<Result<(), error::Error>> {
-        std::thread::spawn(move || {
-            let mut stdin = io::stdin();
-            'main: loop {
-                // wait until state is busy.
-                let mut buf: Option<Buf>;
-                let mut waker: Option<std::task::Waker>;
-                {
-                    let mut state = state_lock.lock()?;
-                    'wait_state: loop {
-                        match *state {
-                            State::Dropped => break 'main,
-                            State::Busy(ref mut b, ref w) => {
-                                buf = Some(b.take().unwrap());
-                                waker = Some(w.clone());
-                                break 'wait_state;
+        std::thread::Builder::new()
+            .name("stdin-reader".to_string())
+            .spawn(move || {
+                let mut stdin = io::stdin();
+                'main: loop {
+                    // wait until state is busy.
+                    let mut buf: Option<Buf>;
+                    {
+                        let mut state = state_lock.lock()?;
+                        'wait_state: loop {
+                            match *state {
+                                State::Dropped => break 'main,
+                                State::Busy(ref mut b, _) => {
+                                    buf = Some(b.take().unwrap());
+                                    break 'wait_state;
+                                }
+                                _ => state = state_lock.wait(state)?,
                             }
-                            _ => state = state_lock.wait(state)?,
                         }
                     }
-                }
 
-                let mut buf = buf.take().unwrap();
-                let read = buf.read_from(&mut stdin);
-                let state = state_lock.lock()?;
-                drop(state_lock.update(state, State::Ready(Some(buf), Some(read))));
-                waker.take().unwrap().wake_by_ref();
-            }
-            Ok::<(), crate::error::Error>(())
-        })
+                    let mut buf = buf.take().unwrap();
+                    let read = buf.read_from(&mut stdin);
+                    let mut guard = state_lock.lock()?;
+                    if let State::Busy(_, ref mut w) = *guard {
+                        let waker = w.take().unwrap();
+                        guard = state_lock.update(guard, State::Ready(Some(buf), Some(read)));
+                        drop(guard);
+                        waker.wake();
+                    } else {
+                        unreachable!();
+                    }
+                }
+                Ok::<(), crate::error::Error>(())
+            })
+            .expect("failed to spawn stdin-reader thread")
     }
 }
 
@@ -213,12 +220,14 @@ impl AsyncRead for AsyncStdin {
                         }
 
                         buf.ensure_capacity_for(dst);
-                        guard = self
-                            .state_lock
-                            .update_and_notify(guard, State::Busy(Some(buf), cx.waker().clone()))
+                        guard = self.state_lock.update_and_notify(
+                            guard,
+                            State::Busy(Some(buf), Some(cx.waker().clone())),
+                        )
                     }
-                    State::Busy(_, _) => {
+                    State::Busy(_, ref mut waker_cell) => {
                         assert!(!self.thread_handle.as_ref().unwrap().is_finished());
+                        *waker_cell = Some(cx.waker().clone());
                         return Poll::Pending;
                     }
                     State::Ready(ref mut buf_cell, ref mut res_cell) => {
