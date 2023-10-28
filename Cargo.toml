@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 bstr = "1.7.0"
+termios = "0.3"
+tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "sync", "io-std", "io-util"] }
 
 [dev-dependencies]
 rand = { version = "0.8", default-features = false, features = ["getrandom", "small_rng"] }

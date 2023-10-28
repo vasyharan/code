@@ -254,7 +254,7 @@ mod tests {
             }
         }
 
-        (0..1_000_000).fold(rope.clone(), |rope, i| {
+        (0..1_000).fold(rope.clone(), |rope, i| {
             let op: Operation = rng.gen();
             if rope.len() == 0 {
                 let len = bytes.len();

@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::rope::block::BlockRange;
-use bstr::{BString, ByteVec};
+use bstr::{BString, ByteSlice, ByteVec};
 use Node::{Branch, Empty, Leaf};
 
 #[derive(Debug)]
@@ -119,7 +119,7 @@ impl Node {
                 write!(w, "\tn{:p} -> n{:p}[label=\"{}\"];\n", self, right.as_ref(), right.len())?;
             }
             Leaf { block_ref, .. } => {
-                let s = String::from_utf8(block_ref.as_bytes().into()).unwrap();
+                let s = block_ref.as_bytes().as_bstr();
                 write!(w, "\tn{:p}[shape=square,label=\"'{}'\"];\n", self, s)?;
             }
             Empty => {
