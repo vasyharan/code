@@ -1,4 +1,5 @@
+pub mod app;
 pub mod rope;
 
-pub mod error;
-pub mod term;
+mod error;
+mod term;

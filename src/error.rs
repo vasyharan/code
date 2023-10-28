@@ -10,7 +10,7 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl <T> From<std::sync::PoisonError<T>> for Error {
+impl<T> From<std::sync::PoisonError<T>> for Error {
     fn from(_err: std::sync::PoisonError<T>) -> Error {
         Error::Unhandled
     }
