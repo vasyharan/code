@@ -1,5 +1,8 @@
+use clap::Parser;
+
 use toku::app;
 
 fn main() -> app::Result<()> {
-    app::main()
+    let args = toku::app::Args::parse();
+    app::main(args)
 }

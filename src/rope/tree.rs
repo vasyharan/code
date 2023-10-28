@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::rope::block::BlockRange;
 use bstr::{BString, ByteSlice, ByteVec};
@@ -39,8 +39,8 @@ impl std::fmt::Display for NodeColour {
 enum Node {
     Branch {
         colour: NodeColour,
-        left: Rc<Node>,
-        right: Rc<Node>,
+        left: Arc<Node>,
+        right: Arc<Node>,
         len: usize,
     },
     Leaf {
@@ -56,7 +56,7 @@ impl Node {
         Empty
     }
 
-    fn new_branch(colour: NodeColour, left: Rc<Node>, right: Rc<Node>) -> Self {
+    fn new_branch(colour: NodeColour, left: Arc<Node>, right: Arc<Node>) -> Self {
         let len = left.len() + right.len();
         Branch { colour, left, right, len }
     }
@@ -143,16 +143,16 @@ impl Node {
 }
 
 #[derive(Debug, Clone)]
-pub struct Tree(Rc<Node>);
+pub struct Tree(Arc<Node>);
 
 impl Tree {
     pub fn empty() -> Self {
-        let root = Rc::new(Node::empty());
+        let root = Arc::new(Node::empty());
         Self(root)
     }
 
     // pub fn from_str(str: &str) -> Self {
-    //     let root = Rc::new(Node::new_leaf(str.to_owned()));
+    //     let root = Arc::new(Node::new_leaf(str.to_owned()));
     //     Self(root)
     // }
 
@@ -161,23 +161,23 @@ impl Tree {
     }
 
     pub fn insert_at(&self, offset: usize, text: BlockRange) -> Self {
-        fn rec(node: &Rc<Node>, offset: usize, text: BlockRange) -> Node {
+        fn rec(node: &Arc<Node>, offset: usize, text: BlockRange) -> Node {
             match node.as_ref() {
                 Empty => Node::new_leaf(text),
                 Leaf { block_ref, .. } => {
                     if node.len() == 0 {
                         Node::new_leaf(text)
                     } else if offset == 0 {
-                        let left = Rc::new(Node::new_leaf(text));
+                        let left = Arc::new(Node::new_leaf(text));
                         Node::new_branch(NodeColour::Red, left, node.clone())
                     } else if offset == node.len() {
-                        let right = Rc::new(Node::new_leaf(text));
+                        let right = Arc::new(Node::new_leaf(text));
                         Node::new_branch(NodeColour::Red, node.clone(), right)
                     } else {
-                        let left = Rc::new(Node::new_leaf(block_ref.substr(..offset)));
-                        let rl = Rc::new(Node::new_leaf(text));
-                        let rr = Rc::new(Node::new_leaf(block_ref.substr(offset..)));
-                        let right = Rc::new(Node::new_branch(NodeColour::Red, rl, rr));
+                        let left = Arc::new(Node::new_leaf(block_ref.substr(..offset)));
+                        let rl = Arc::new(Node::new_leaf(text));
+                        let rr = Arc::new(Node::new_leaf(block_ref.substr(offset..)));
+                        let right = Arc::new(Node::new_branch(NodeColour::Red, rl, rr));
                         Node::new_branch(NodeColour::Red, left, right)
                     }
                 }
@@ -185,19 +185,19 @@ impl Tree {
                     let left_len = left.len();
                     if left_len > offset {
                         let left = rec(left, offset, text);
-                        let (node, _) = balance(*colour, Rc::new(left), right.clone());
+                        let (node, _) = balance(*colour, Arc::new(left), right.clone());
                         node
                     } else {
                         let offset = offset - left_len;
                         let right = rec(right, offset, text);
-                        let (node, _) = balance(*colour, left.clone(), Rc::new(right));
+                        let (node, _) = balance(*colour, left.clone(), Arc::new(right));
                         node
                     }
                 }
             }
         }
 
-        Tree(make_black(Rc::new(rec(&self.0, offset, text))))
+        Tree(make_black(Arc::new(rec(&self.0, offset, text))))
     }
 
     pub fn split(&self, at: usize) -> (Option<Tree>, Option<Tree>) {
@@ -252,13 +252,13 @@ impl Tree {
 
 impl From<Node> for Tree {
     fn from(node: Node) -> Self {
-        Self(Rc::new(node))
+        Self(Arc::new(node))
     }
 }
 
-fn make_black(node: Rc<Node>) -> Rc<Node> {
+fn make_black(node: Arc<Node>) -> Arc<Node> {
     match node.as_ref() {
-        Branch { colour: NodeColour::Red, left, right, len, .. } => Rc::new(Branch {
+        Branch { colour: NodeColour::Red, left, right, len, .. } => Arc::new(Branch {
             colour: NodeColour::Black,
             left: left.clone(),
             right: right.clone(),
@@ -268,7 +268,7 @@ fn make_black(node: Rc<Node>) -> Rc<Node> {
     }
 }
 
-fn balance(colour: NodeColour, left: Rc<Node>, right: Rc<Node>) -> (Node, bool) {
+fn balance(colour: NodeColour, left: Arc<Node>, right: Arc<Node>) -> (Node, bool) {
     use NodeColour::{Black, Red};
     if colour == Red {
         return (Node::new_branch(colour, left, right), false);
@@ -280,13 +280,13 @@ fn balance(colour: NodeColour, left: Rc<Node>, right: Rc<Node>) -> (Node, bool) 
             let d = right;
             let l = Node::new_branch(Black, a.clone(), b.clone());
             let r = Node::new_branch(Black, c.clone(), d.clone());
-            return (Node::new_branch(Red, Rc::new(l), Rc::new(r)), true);
+            return (Node::new_branch(Red, Arc::new(l), Arc::new(r)), true);
         } else if let Branch { colour: Red, left: b, right: c, .. } = lr.as_ref() {
             let a = ll;
             let d = right;
             let l = Node::new_branch(Black, a.clone(), b.clone());
             let r = Node::new_branch(Black, c.clone(), d.clone());
-            return (Node::new_branch(Red, Rc::new(l), Rc::new(r)), true);
+            return (Node::new_branch(Red, Arc::new(l), Arc::new(r)), true);
         }
     };
 
@@ -296,13 +296,13 @@ fn balance(colour: NodeColour, left: Rc<Node>, right: Rc<Node>) -> (Node, bool) 
             let d = rr;
             let l = Node::new_branch(Black, a.clone(), b.clone());
             let r = Node::new_branch(Black, c.clone(), d.clone());
-            return (Node::new_branch(Red, Rc::new(l), Rc::new(r)), true);
+            return (Node::new_branch(Red, Arc::new(l), Arc::new(r)), true);
         } else if let Branch { colour: Red, left: c, right: d, .. } = rr.as_ref() {
             let a = left;
             let b = rl.clone();
             let l = Node::new_branch(Black, a.clone(), b.clone());
             let r = Node::new_branch(Black, c.clone(), d.clone());
-            return (Node::new_branch(Red, Rc::new(l), Rc::new(r)), true);
+            return (Node::new_branch(Red, Arc::new(l), Arc::new(r)), true);
         }
     }
 
@@ -316,7 +316,7 @@ fn balance(colour: NodeColour, left: Rc<Node>, right: Rc<Node>) -> (Node, bool) 
 //         T'.right.right.color=black;
 //         return rotateLeft(T')
 //     return T' /* T''[recte T'] */
-fn join_right(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, usize) {
+fn join_right(left: (Arc<Node>, usize), right: (Arc<Node>, usize)) -> (Arc<Node>, usize) {
     let (left, lheight) = left;
     let (right, rheight) = right;
     debug_assert_eq!(lheight, black_height(left.as_ref()));
@@ -325,11 +325,11 @@ fn join_right(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, u
         if let Branch { colour, .. } = left.as_ref() {
             if *colour == NodeColour::Black {
                 let node = Node::new_branch(NodeColour::Red, left.clone(), right.clone());
-                return (Rc::new(node), lheight);
+                return (Arc::new(node), lheight);
             }
         } else {
             let node = Node::new_branch(NodeColour::Red, left.clone(), right.clone());
-            return (Rc::new(node), lheight);
+            return (Arc::new(node), lheight);
         }
     }
     match (left.as_ref(), right.as_ref()) {
@@ -337,13 +337,13 @@ fn join_right(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, u
             let lrheight = lheight - (colour.black_height() as usize);
             let (right, jrheight) = join_right((lr.clone(), lrheight), (right, rheight));
             let (node, _) = balance(*colour, ll.clone(), right);
-            (Rc::new(node), jrheight + (colour.black_height() as usize))
+            (Arc::new(node), jrheight + (colour.black_height() as usize))
         }
         _ => unreachable!(),
     }
 }
 
-fn join_left(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, usize) {
+fn join_left(left: (Arc<Node>, usize), right: (Arc<Node>, usize)) -> (Arc<Node>, usize) {
     let (left, lheight) = left;
     let (right, rheight) = right;
     debug_assert_eq!(lheight, black_height(left.as_ref()));
@@ -352,11 +352,11 @@ fn join_left(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, us
         if let Branch { colour, .. } = right.as_ref() {
             if *colour == NodeColour::Black {
                 let node = Node::new_branch(NodeColour::Red, left.clone(), right.clone());
-                return (Rc::new(node), lheight);
+                return (Arc::new(node), lheight);
             }
         } else {
             let node = Node::new_branch(NodeColour::Red, left.clone(), right.clone());
-            return (Rc::new(node), lheight);
+            return (Arc::new(node), lheight);
         }
     }
     match (left.as_ref(), right.as_ref()) {
@@ -364,16 +364,16 @@ fn join_left(left: (Rc<Node>, usize), right: (Rc<Node>, usize)) -> (Rc<Node>, us
             let rlheight = rheight - (colour.black_height() as usize);
             let (left, jlheight) = join_left((left, lheight), (rl.clone(), rlheight));
             let (node, _) = balance(*colour, left, rr.clone());
-            (Rc::new(node), jlheight + (colour.black_height() as usize))
+            (Arc::new(node), jlheight + (colour.black_height() as usize))
         }
         _ => unreachable!(),
     }
 }
 
 fn join(
-    maybe_left: Option<(Rc<Node>, usize)>,
-    maybe_right: Option<(Rc<Node>, usize)>,
-) -> Option<(Rc<Node>, usize)> {
+    maybe_left: Option<(Arc<Node>, usize)>,
+    maybe_right: Option<(Arc<Node>, usize)>,
+) -> Option<(Arc<Node>, usize)> {
     match (maybe_left, maybe_right) {
         (None, None) => None,
         (None, Some(right)) => Some(right.clone()),
@@ -395,17 +395,17 @@ fn join(
                         NodeColour::Black
                     };
                 let node = Node::new_branch(colour, left.clone(), right.clone());
-                Some((Rc::new(node), lheight + (colour.black_height() as usize)))
+                Some((Arc::new(node), lheight + (colour.black_height() as usize)))
             }
         }
     }
 }
 
-fn split(node: &Node, at: usize) -> (Option<(Rc<Node>, usize)>, Option<(Rc<Node>, usize)>) {
+fn split(node: &Node, at: usize) -> (Option<(Arc<Node>, usize)>, Option<(Arc<Node>, usize)>) {
     fn split_rec(
         node: &Node,
         at: usize,
-    ) -> (Option<(Rc<Node>, usize)>, Option<(Rc<Node>, usize)>, usize) {
+    ) -> (Option<(Arc<Node>, usize)>, Option<(Arc<Node>, usize)>, usize) {
         match node {
             Empty => (None, None, 0),
             Leaf { block_ref, .. } => {
@@ -413,12 +413,12 @@ fn split(node: &Node, at: usize) -> (Option<(Rc<Node>, usize)>, Option<(Rc<Node>
                 let split_left = if at == 0 {
                     None
                 } else {
-                    Some((Rc::new(Node::new_leaf(block_ref.substr(..at))), 0))
+                    Some((Arc::new(Node::new_leaf(block_ref.substr(..at))), 0))
                 };
                 let split_right = if at == block_ref.len() {
                     None
                 } else {
-                    Some((Rc::new(Node::new_leaf(block_ref.substr(at..))), 0))
+                    Some((Arc::new(Node::new_leaf(block_ref.substr(at..))), 0))
                 };
                 (split_left, split_right, 0)
             }
@@ -470,9 +470,9 @@ fn black_height(node: &Node) -> usize {
 
 fn debug_assert_split_balanced(
     prefix: &str,
-    pre_split: &Rc<Node>,
-    split_left: &Option<(Rc<Node>, usize)>,
-    split_right: &Option<(Rc<Node>, usize)>,
+    pre_split: &Arc<Node>,
+    split_left: &Option<(Arc<Node>, usize)>,
+    split_right: &Option<(Arc<Node>, usize)>,
 ) {
     if cfg!(debug_assertions) {
         let left_bal = if let Some((ref node, _)) = split_left {

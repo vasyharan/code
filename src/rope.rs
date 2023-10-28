@@ -1,7 +1,7 @@
 mod block;
 mod tree;
+pub use self::block::BlockBuffer;
 pub use self::block::BlockRange;
-pub use self::block::Buffer;
 use self::tree::Tree;
 use bstr::BString;
 
@@ -78,7 +78,7 @@ mod tests {
     use bstr::ByteSlice;
 
     use super::*;
-    use crate::rope::block::Buffer;
+    use crate::rope::block::BlockBuffer;
 
     #[test]
     fn basic_tests() {
@@ -132,7 +132,7 @@ mod tests {
         let mut rope = Rope::empty();
         assert!(rope.is_balanced());
 
-        let mut buffer = Buffer::new();
+        let mut buffer = BlockBuffer::new();
         for (_i, (at, p)) in parts.iter().enumerate() {
             let (block, w) = buffer.append(p.as_bytes()).unwrap();
             assert_eq!(w, p.len());
@@ -236,7 +236,7 @@ mod tests {
         use rand::{distributions::Standard, prelude::Distribution, Rng, RngCore, SeedableRng};
         let rope = Rope::empty();
         let mut bytes = [0; 8192];
-        let mut buffer = Buffer::new();
+        let mut buffer = BlockBuffer::new();
         let mut rng = rand::rngs::SmallRng::from_entropy();
 
         enum Operation {
