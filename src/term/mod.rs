@@ -1,6 +1,6 @@
 mod keyboard;
+mod rawmode;
 mod stdin;
-mod termios;
 
 pub use crate::term::keyboard::{Key, KeyboardInput};
-pub use crate::term::termios::RawMode;
+pub use crate::term::rawmode::RawMode;
