@@ -169,14 +169,20 @@ impl AsyncStdin {
                     let mut buf = buf.take().unwrap();
                     let read = buf.read_from(&mut stdin);
                     let mut guard = state_lock.lock()?;
-                    if let State::Busy(_, ref mut w) = *guard {
-                        let waker = w.take().unwrap();
-                        guard = state_lock.update(guard, State::Ready(Some(buf), Some(read)));
-                        drop(guard);
-                        waker.wake();
-                    } else {
-                        unreachable!();
+                    match *guard {
+                        State::Dropped => break 'main,
+                        State::Busy(_, ref mut w) => {
+                            let waker = w.take().unwrap();
+                            guard = state_lock.update(guard, State::Ready(Some(buf), Some(read)));
+                            drop(guard);
+                            waker.wake();
+                        }
+                        _ => unreachable!(),
                     }
+                    // if let State::Busy(_, ref mut w) = *guard {
+                    // } else {
+                    //     unreachable!();
+                    // }
                 }
                 Ok::<(), crate::error::Error>(())
             })

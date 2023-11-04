@@ -80,7 +80,7 @@ async fn app_main(mut command_rx: mpsc::Receiver<Command>) -> error::Result<()> 
                         if read == 0 {
                             break;
                         }
-                        state.buffer = state.buffer.insert_at(state.buffer.len(), block)?;
+                        state.buffer = state.buffer.insert(state.buffer.len(), block)?;
                     }
                 }
             }
@@ -95,15 +95,16 @@ async fn redraw_screen(state: &mut State) -> error::Result<()> {
     state.display.flush().await?;
 
     state.display.cursor_position(0, 0).await?;
+    let mut lines = state.buffer.lines();
     for linenum in 1..state.display.dimensions.rows {
-        let line = state.buffer.line(linenum);
-        if let Some(parts) = line {
-            for part in parts {
-                state.display.write_all(part).await?;
+        if let Some(line) = lines.next() {
+            for chunk in line.chunks() {
+                state.display.write_all(chunk).await?;
             }
         } else {
             state.display.write_all(b"~").await?;
         }
+        // state.display.write_all(b"~").await?;
 
         state
             .display

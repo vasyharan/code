@@ -86,15 +86,15 @@ impl Display {
 
 impl Drop for Display {
     fn drop(&mut self) {
-        use std::io::Write;
-        let mut out = std::io::stdout();
-        // TODO: do this sync so that we can handle panics
-        let disable_alternate_screen = out.write(b"\x1b[?1049l\x1b[H");
-        let clear_screen = out.write(b"\x1b[2J");
-        let reset_cursor = out.write(b"\x1b[H");
-        _ = out.flush();
-        disable_alternate_screen.expect("error disabling alternate screen on exit");
-        clear_screen.expect("error clearing screen on exit");
-        reset_cursor.expect("error resetting cursor on exit");
+        // use std::io::Write;
+        // let mut out = std::io::stdout();
+        // // TODO: do this sync so that we can handle panics
+        // let disable_alternate_screen = out.write(b"\x1b[?1049l\x1b[H");
+        // let clear_screen = out.write(b"\x1b[2J");
+        // let reset_cursor = out.write(b"\x1b[H");
+        // _ = out.flush();
+        // disable_alternate_screen.expect("error disabling alternate screen on exit");
+        // clear_screen.expect("error clearing screen on exit");
+        // reset_cursor.expect("error resetting cursor on exit");
     }
 }

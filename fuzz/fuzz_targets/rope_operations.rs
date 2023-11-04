@@ -21,12 +21,12 @@ fuzz_target!(|ops: Vec<Operation>| {
             Insert { at, contents } => {
                 let (block, written) = buffer.append(&contents).unwrap();
                 assert_eq!(written, contents.len());
-                let rope = rope.insert_at(at, block).unwrap_or(rope);
+                let rope = rope.insert(at, block).unwrap_or(rope);
                 assert!(rope.is_balanced());
                 rope
             }
             Delete { at, len } => {
-                let (updated, deleted) = rope.delete_at(at, len).unwrap_or((rope, Rope::empty()));
+                let (updated, deleted) = rope.delete(at..at + len).unwrap_or((rope, Rope::empty()));
                 assert!(updated.is_balanced());
                 assert!(deleted.is_balanced());
                 updated
