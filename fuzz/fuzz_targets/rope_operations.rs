@@ -3,7 +3,7 @@
 extern crate toku;
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use toku::rope::Buffer;
+use toku::rope::BlockBuffer;
 use toku::rope::Rope;
 
 #[derive(Arbitrary, Clone, Debug)]
@@ -14,7 +14,7 @@ pub enum Operation {
 
 fuzz_target!(|ops: Vec<Operation>| {
     use Operation::{Delete, Insert};
-    let mut buffer = Buffer::new();
+    let mut buffer = BlockBuffer::new();
     ops.into_iter().fold(Rope::empty(), |rope, op| {
         println!("{:?}", op);
         match op {

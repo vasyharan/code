@@ -18,16 +18,18 @@ in {
   languages.nix.enable = true;
   languages.rust = {
     enable = true;
-    channel = "stable";
+    channel = "nightly";
     components = [ 
       "rustc" 
       "cargo" 
       "cargo-watch" 
+      "cargo-fuzz" 
       "clippy" 
       "rustfmt" 
       "rust-analyzer" 
     ];
     toolchain.cargo-watch = unstable.cargo-watch;
+    toolchain.cargo-fuzz = unstable.cargo-fuzz;
   };
 
   packages = [
