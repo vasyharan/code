@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
 use crate::rope::block::BlockRange;
 use bstr::{BString, ByteVec};
@@ -41,12 +41,14 @@ enum Node {
         colour: NodeColour,
         left: Arc<Node>,
         right: Arc<Node>,
+        num_lines: usize,
         len: usize,
     },
     Leaf {
         // val: String,
         // len: usize,
         block_ref: BlockRange,
+        num_lines: usize,
     },
     Empty,
 }
@@ -58,17 +60,26 @@ impl Node {
 
     fn new_branch(colour: NodeColour, left: Arc<Node>, right: Arc<Node>) -> Self {
         let len = left.len() + right.len();
-        Branch { colour, left, right, len }
+        let num_lines = left.num_lines() + right.num_lines();
+        Branch { colour, left, right, len, num_lines }
     }
 
     fn new_leaf(val: BlockRange) -> Self {
-        Leaf { block_ref: val }
+        let num_lines = bytecount::count(val.as_bytes(), b'\n');
+        Leaf { block_ref: val, num_lines }
     }
 
     fn len(&self) -> usize {
         match &self {
             Branch { len, .. } => *len,
             Leaf { block_ref, .. } => block_ref.len(),
+            Empty => 0,
+        }
+    }
+
+    fn num_lines(&self) -> usize {
+        match &self {
+            Branch { num_lines, .. } | Leaf { num_lines, .. } => *num_lines,
             Empty => 0,
         }
     }
@@ -159,6 +170,10 @@ impl Tree {
         self.0.len()
     }
 
+    pub fn num_lines(&self) -> usize {
+        self.0.num_lines() + 1
+    }
+
     pub fn insert_at(&self, offset: usize, text: BlockRange) -> Self {
         fn rec(node: &Arc<Node>, offset: usize, text: BlockRange) -> Node {
             match node.as_ref() {
@@ -235,6 +250,42 @@ impl Tree {
         (updated, deleted)
     }
 
+    pub(crate) fn line_range<'a>(&'a self, linenum: usize) -> Option<TreeRange<'a>> {
+        if self.num_lines() < linenum {
+            return None;
+        }
+        let start = if linenum == 1 {
+            Some(0)
+        } else {
+            byte_offset_for_line(&self.0, linenum - 1).map(|i| i + 1)
+        };
+        let end = if self.num_lines() == linenum {
+            None
+        } else {
+            byte_offset_for_line(&self.0, linenum).map(|i| i + 1)
+        };
+        match (start, end) {
+            (None, None) => None,
+            (None, Some(_)) => unreachable!(),
+            (Some(start), None) => {
+                if start == self.len() {
+                    None
+                } else {
+                    Some(TreeRange::new(self, start..self.len()))
+                }
+            }
+            (Some(start), Some(end)) => Some(TreeRange::new(self, start..end)),
+        }
+    }
+
+    fn leaf_node_at<'a>(&'a self, at: usize) -> Option<(&'a Node, usize)> {
+        if at > self.0.len() {
+            None
+        } else {
+            Some(leaf_node_at(self.0.as_ref(), at))
+        }
+    }
+
     pub fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         write!(w, "digraph {{\n")?;
         self.0.write_dot(w)?;
@@ -257,15 +308,97 @@ impl From<Node> for Tree {
     }
 }
 
+pub struct TreeRange<'a> {
+    tree: &'a Tree,
+    start: usize,
+    end: usize,
+}
+
+impl<'a> TreeRange<'a> {
+    fn new(tree: &'a Tree, range: Range<usize>) -> Self {
+        Self { tree, start: range.start, end: range.end }
+    }
+}
+
+impl<'a> Iterator for TreeRange<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start >= self.end {
+            return None;
+        }
+        if let Some((leaf, leaf_start)) = self.tree.leaf_node_at(self.start) {
+            if let Leaf { block_ref, .. } = leaf {
+                self.start += block_ref.len();
+                if self.start >= self.end {
+                    let len = self.end - (self.start - block_ref.len()) - 1;
+                    Some(&block_ref.as_bytes()[leaf_start..(leaf_start + len)])
+                } else {
+                    Some(&block_ref.as_bytes()[leaf_start..])
+                }
+            } else {
+                unreachable!()
+            }
+        } else {
+            None
+        }
+    }
+}
+
 fn make_black(node: Arc<Node>) -> Arc<Node> {
     match node.as_ref() {
-        Branch { colour: NodeColour::Red, left, right, len, .. } => Arc::new(Branch {
+        Branch { colour: NodeColour::Red, left, right, len, num_lines } => Arc::new(Branch {
             colour: NodeColour::Black,
             left: left.clone(),
             right: right.clone(),
             len: *len,
+            num_lines: *num_lines,
         }),
         _ => node,
+    }
+}
+
+fn byte_offset_for_line(node: &Node, linenum: usize) -> Option<usize> {
+    match node {
+        Empty => None,
+        Leaf { block_ref, .. } => {
+            if linenum == 1 {
+                memchr::memchr(b'\n', block_ref.as_bytes())
+            } else {
+                memchr::memchr_iter(b'\n', block_ref.as_bytes())
+                    .enumerate()
+                    .find(|(i, _)| *i == linenum - 1)
+                    .map(|(_, p)| p)
+            }
+        }
+        Branch { left, right, .. } => {
+            if linenum <= left.num_lines() {
+                byte_offset_for_line(left.as_ref(), linenum)
+            } else {
+                byte_offset_for_line(right.as_ref(), linenum - left.num_lines())
+                    .map(|o| o + left.len())
+            }
+        }
+    }
+}
+
+fn leaf_node_at<'a>(node: &'a Node, at: usize) -> (&'a Node, usize) {
+    match node {
+        Empty => {
+            debug_assert!(at == 0);
+            (node, at)
+        }
+        Leaf { block_ref, .. } => {
+            debug_assert!(at <= block_ref.len());
+            (node, at)
+        }
+        Branch { left, right, .. } => {
+            if at < left.len() {
+                leaf_node_at(left.as_ref(), at)
+            } else {
+                leaf_node_at(right.as_ref(), at - left.len())
+            }
+        }
     }
 }
 

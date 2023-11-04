@@ -1,5 +1,6 @@
 mod block;
 mod tree;
+
 pub use self::block::BlockBuffer;
 pub use self::block::BlockRange;
 use self::tree::Tree;
@@ -24,7 +25,17 @@ impl Rope {
         self.root.len()
     }
 
+    pub fn num_lines(&self) -> usize {
+        self.root.num_lines()
+    }
+
     pub fn insert_at(&self, offset: usize, text: BlockRange) -> Result<Self, Error> {
+        if text.len() == 0 {
+            return Ok(Self { root: self.root.clone() });
+        }
+        if offset > self.root.len() {
+            return Err(Error::EOS);
+        }
         let root = self.root.insert_at(offset, text);
         Ok(Self { root })
     }
@@ -60,6 +71,10 @@ impl Rope {
 
     pub fn to_bstring(&self) -> BString {
         self.root.to_bstring()
+    }
+
+    pub(crate) fn line<'a>(&'a self, linenum: usize) -> Option<tree::TreeRange<'a>> {
+        self.root.line_range(linenum)
     }
 
     fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
@@ -122,6 +137,7 @@ mod tests {
             and they continue singing it forever just because...\n\
         "
         .into();
+        let lines: Vec<_> = contents.lines().collect();
 
         let mut rope = Rope::empty();
         assert!(rope.is_balanced());
@@ -140,6 +156,14 @@ mod tests {
         }
         assert!(rope.is_balanced());
         assert_eq!(rope.to_bstring(), contents);
+        assert_eq!(rope.num_lines(), 6);
+        for i in 1..=5 {
+            let line = rope.line(i).expect("missing line");
+            let line = line.fold(BString::new(Vec::with_capacity(64)), |s, part| {
+                [s, part.as_bstr().into()].concat().into()
+            });
+            assert_eq!(line, lines[i - 1].as_bstr());
+        }
 
         for at in 0..rope.len() {
             let (split_left, split_right) = rope.split(at).expect("split rope");

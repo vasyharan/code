@@ -44,13 +44,26 @@ pub fn main(args: Args) -> Result<()> {
 
 #[derive(Debug)]
 struct State {
+    display: term::Display,
     buffer: rope::Rope,
+}
+
+impl State {
+    fn new() -> Self {
+        let buffer = rope::Rope::empty();
+        let display = term::Display::new();
+        Self { buffer, display }
+    }
 }
 
 async fn app_main(mut command_rx: mpsc::Receiver<Command>) -> error::Result<()> {
     let mut keyboard = term::KeyboardInput::new();
-    let mut state = State { buffer: rope::Rope::empty() };
+    let mut state = State::new();
+    state.display.enable_alternate_screen().await?;
+
     'main: loop {
+        redraw_screen(&mut state).await?;
+
         let maybe_command = tokio::select! {
             key = keyboard.read_key() => { process_key(key?) }
             maybe_command = command_rx.recv() => { maybe_command }
@@ -74,6 +87,36 @@ async fn app_main(mut command_rx: mpsc::Receiver<Command>) -> error::Result<()> 
         }
     }
 
+    Ok(())
+}
+
+async fn redraw_screen(state: &mut State) -> error::Result<()> {
+    state.display.hide_cursor().await?;
+    state.display.flush().await?;
+
+    state.display.cursor_position(0, 0).await?;
+    for linenum in 1..state.display.dimensions.rows {
+        let line = state.buffer.line(linenum);
+        if let Some(parts) = line {
+            for part in parts {
+                state.display.write_all(part).await?;
+            }
+        } else {
+            state.display.write_all(b"~").await?;
+        }
+
+        state
+            .display
+            .erase_in_line(term::display::EraseInMode::FromPos)
+            .await?;
+        if linenum < state.display.dimensions.rows - 1 {
+            state.display.write_all(b"\r\n").await?;
+        }
+        state.display.flush().await?;
+    }
+    state.display.cursor_position(0, 0).await?;
+    state.display.show_cursor().await?;
+    state.display.flush().await?;
     Ok(())
 }
 
