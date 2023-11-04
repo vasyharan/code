@@ -56,28 +56,36 @@ impl BlockBuffer {
 
     pub fn append(&mut self, val: &[u8]) -> std::io::Result<(BlockRange, usize)> {
         use std::io::Write;
-        let head = self.head;
-        let len = min(val.len(), BLOCK_CAPACITY - head);
+        let (block, head, rem) = self.block_remaining();
+        let len = min(val.len(), rem);
         let mut bytes: &mut [u8] = unsafe {
-            let bytes = (&self.block.as_ref().0 as *const u8) as *mut u8;
+            let bytes = (&block.as_ref().0 as *const u8) as *mut u8;
             std::slice::from_raw_parts_mut(bytes.offset(head as isize), len)
         };
         let written = bytes.write(&val[..len])?;
         self.head += written;
         let range = head..(head + written);
-        Ok((BlockRange(self.block.clone(), range), written))
+        Ok((BlockRange(block.clone(), range), written))
     }
 
     pub async fn read(&mut self, file: &mut File) -> std::io::Result<(BlockRange, usize)> {
-        let head = self.head;
-        let len = BLOCK_CAPACITY - head;
+        let (block, head, rem) = self.block_remaining();
         let mut bytes: &mut [u8] = unsafe {
-            let bytes = (&self.block.as_ref().0 as *const u8) as *mut u8;
-            std::slice::from_raw_parts_mut(bytes.offset(head as isize), len)
+            let bytes = (&block.as_ref().0 as *const u8) as *mut u8;
+            std::slice::from_raw_parts_mut(bytes.offset(head as isize), rem)
         };
         let written = file.read(&mut bytes).await?;
         self.head += written;
         let range = head..(head + written);
-        Ok((BlockRange(self.block.clone(), range), written))
+        Ok((BlockRange(block.clone(), range), written))
+    }
+
+    fn block_remaining(&mut self) -> (Arc<Bytes>, usize, usize) {
+        if self.head >= BLOCK_CAPACITY {
+            // new block please
+            self.block = Arc::new(Bytes([0; BLOCK_CAPACITY]));
+            self.head = 0;
+        }
+        (self.block.clone(), self.head, BLOCK_CAPACITY - self.head)
     }
 }

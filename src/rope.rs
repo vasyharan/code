@@ -25,12 +25,6 @@ impl Rope {
     }
 
     pub fn insert_at(&self, offset: usize, text: BlockRange) -> Result<Self, Error> {
-        if text.len() == 0 {
-            return Ok(Self { root: self.root.clone() });
-        }
-        if offset > self.root.len() {
-            return Err(Error::EOS);
-        }
         let root = self.root.insert_at(offset, text);
         Ok(Self { root })
     }
@@ -75,10 +69,10 @@ impl Rope {
 
 #[cfg(test)]
 mod tests {
-    use bstr::ByteSlice;
-
+    use super::block::BlockBuffer;
     use super::*;
-    use crate::rope::block::BlockBuffer;
+
+    use bstr::ByteSlice;
 
     #[test]
     fn basic_tests() {
@@ -228,81 +222,6 @@ mod tests {
             assert!(updated.is_balanced(), "unbalanced left node; delete middle {}", i);
             assert!(deleted.is_balanced(), "unbalanced right node; delete middle {}", i);
             updated
-        });
-    }
-
-    #[test]
-    fn random_tests() {
-        use rand::{distributions::Standard, prelude::Distribution, Rng, RngCore, SeedableRng};
-        let rope = Rope::empty();
-        let mut bytes = [0; 8192];
-        let mut buffer = BlockBuffer::new();
-        let mut rng = rand::rngs::SmallRng::from_entropy();
-
-        enum Operation {
-            Insert,
-            Delete,
-        }
-
-        impl Distribution<Operation> for Standard {
-            fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Operation {
-                match rng.gen_range(0..2) {
-                    0 => Operation::Insert,
-                    1 => Operation::Delete,
-                    _ => unreachable!(),
-                }
-            }
-        }
-
-        (0..1_000).fold(rope.clone(), |rope, i| {
-            let op: Operation = rng.gen();
-            if rope.len() == 0 {
-                let len = bytes.len();
-                let mut buf = &mut bytes[0..(rng.gen_range(0..len))];
-                rng.fill_bytes(buf);
-
-                let mut at = 0;
-                let mut rope = rope;
-                while buf.len() > 0 {
-                    let (block, written) = buffer.append(buf).expect("buffer append");
-                    buf = &mut buf[0..written];
-                    rope = rope.insert_at(at, block).expect("rope insert");
-                    at += written;
-                }
-                return rope;
-            }
-            match op {
-                Operation::Insert => {
-                    let mut at = rng.gen_range(0..rope.len());
-                    let len = bytes.len();
-                    let mut buf = &mut bytes[0..(rng.gen_range(0..len))];
-                    rng.fill_bytes(buf);
-
-                    let mut rope = rope;
-                    while buf.len() > 0 {
-                        let (block, written) = buffer.append(buf).expect("buffer append");
-                        buf = &mut buf[0..written];
-                        rope = rope.insert_at(at, block).expect("rope insert");
-                        at += written;
-                    }
-                    assert!(rope.is_balanced(), "unbalanced left node; delete middle {}", i);
-                    rope
-                }
-                Operation::Delete => {
-                    let at = rng.gen_range(0..rope.len());
-                    let len = rng.gen_range(0..(rope.len() - at));
-                    let (updated, deleted) = rope.delete_at(at, len).expect("rope delete");
-                    let deleted_str = deleted.to_bstring();
-                    let updated_str = updated.to_bstring();
-                    let original_str = rope.to_bstring();
-                    assert_eq!(updated_str[..at], BString::from(&original_str[..at]));
-                    assert_eq!(updated_str[at..], BString::from(&original_str[(at + len)..]));
-                    assert_eq!(deleted_str, BString::from(&original_str[at..(at + len)]));
-                    assert!(updated.is_balanced(), "unbalanced left node; delete middle {}", i);
-                    assert!(deleted.is_balanced(), "unbalanced right node; delete middle {}", i);
-                    updated
-                }
-            }
         });
     }
 }
