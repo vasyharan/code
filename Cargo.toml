@@ -11,6 +11,7 @@ clap = {version = "4.0", features = ["derive"]}
 crossterm = {version = "0.27.0", default-features = false, features = ["event-stream", "bracketed-paste"]}
 futures = "0.3.29"
 memchr = "2.6.4"
+ratatui = {version = "0.24.0", default-features = false, features = ["crossterm"]}
 term_size = "0.3"
 termios = "0.3"
 tokio = {version = "1", default-features = false, features = ["macros", "rt-multi-thread", "sync", "io-std", "io-util", "fs"]}

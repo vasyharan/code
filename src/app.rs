@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use bstr::ByteSlice;
 use clap::Parser;
 use crossterm::cursor;
 use crossterm::event::{
@@ -9,15 +10,15 @@ use crossterm::event::{
 use crossterm::terminal;
 use crossterm::QueueableCommand;
 use futures::{future::FutureExt, StreamExt};
+use ratatui::backend::CrosstermBackend;
+use ratatui::prelude::{Buffer, Layout, Rect};
+use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::Terminal;
 use tokio::fs::File;
 use tokio::sync::mpsc;
 
-pub use crate::error::Result;
-use crate::term;
-use crate::{
-    error,
-    rope::{self},
-};
+use crate::error;
+use crate::rope;
 
 #[derive(Parser)]
 pub struct Args {
@@ -31,7 +32,7 @@ enum Command {
     Quit,
 }
 
-pub fn main(args: Args) -> Result<()> {
+pub fn main(args: Args) -> error::Result<()> {
     let supports_keyboard_enhancement =
         matches!(terminal::supports_keyboard_enhancement(), Ok(true));
     setup_panic_handler(supports_keyboard_enhancement);
@@ -57,7 +58,7 @@ pub fn main(args: Args) -> Result<()> {
     Ok(())
 }
 
-fn terminal_enter(supports_keyboard_enhancement: bool) -> Result<()> {
+fn terminal_enter(supports_keyboard_enhancement: bool) -> error::Result<()> {
     let mut stdout = std::io::stdout();
     terminal::enable_raw_mode()?;
     let command_queue = stdout.queue(terminal::EnterAlternateScreen)?;
@@ -73,7 +74,7 @@ fn terminal_enter(supports_keyboard_enhancement: bool) -> Result<()> {
     Ok(())
 }
 
-fn terminal_exit(supports_keyboard_enhancement: bool) -> Result<()> {
+fn terminal_exit(supports_keyboard_enhancement: bool) -> error::Result<()> {
     let mut stdout = std::io::stdout();
     let command_queue = stdout
         .queue(terminal::Clear(terminal::ClearType::All))?
@@ -96,26 +97,48 @@ fn setup_panic_handler(supports_keyboard_enhancement: bool) {
 }
 
 #[derive(Debug)]
-struct State {
-    display: term::Display,
+struct EditorPane {
     buffer: rope::Rope,
 }
 
-impl State {
+impl EditorPane {
     fn new() -> Self {
         let buffer = rope::Rope::empty();
-        let display = term::Display::new();
-        Self { buffer, display }
+        Self { buffer }
+    }
+}
+
+impl Widget for &EditorPane {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let mut lines = self.buffer.lines();
+        let x = area.left();
+        for y in area.top()..area.bottom() {
+            if let Some(line) = lines.next() {
+                let chars = line
+                    .chunks()
+                    // .flat_map(|chunk| chunk.chars())
+                    .flat_map(ByteSlice::chars)
+                    .take(area.width.into());
+                for (offset, c) in chars.enumerate() {
+                    buf.get_mut(x + (offset as u16), y).set_char(c);
+                }
+            } else {
+                buf.get_mut(x, y).set_char('~');
+            }
+        }
     }
 }
 
 async fn app_main(mut command_rx: mpsc::Receiver<Command>) -> error::Result<()> {
     let mut event_stream = EventStream::new();
-    let mut state = State::new();
-    state.display.enable_alternate_screen().await?;
+    let mut tui = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
+    let mut state = EditorPane::new();
 
     'main: loop {
-        redraw_screen(&mut state).await?;
+        tui.draw(|f| {
+            f.render_widget(&state, f.size());
+            f.set_cursor(0, 0);
+        })?;
 
         let maybe_command = tokio::select! {
             maybe_event = event_stream.next().fuse() => {
@@ -149,44 +172,13 @@ async fn app_main(mut command_rx: mpsc::Receiver<Command>) -> error::Result<()> 
     Ok(())
 }
 
-async fn redraw_screen(state: &mut State) -> error::Result<()> {
-    state.display.hide_cursor().await?;
-    state.display.flush().await?;
-
-    state.display.cursor_position(0, 0).await?;
-    let mut lines = state.buffer.lines();
-    for linenum in 1..state.display.dimensions.rows {
-        if let Some(line) = lines.next() {
-            for chunk in line.chunks() {
-                state.display.write_all(chunk).await?;
-            }
-        } else {
-            state.display.write_all(b"~").await?;
-        }
-        // state.display.write_all(b"~").await?;
-
-        state
-            .display
-            .erase_in_line(term::display::EraseInMode::FromPos)
-            .await?;
-        if linenum < state.display.dimensions.rows - 1 {
-            state.display.write_all(b"\r\n").await?;
-        }
-        state.display.flush().await?;
-    }
-    state.display.cursor_position(0, 0).await?;
-    state.display.show_cursor().await?;
-    state.display.flush().await?;
-    Ok(())
-}
-
 fn process_event(event: Event) -> Option<Command> {
     match event {
         Event::FocusGained => todo!(),
         Event::FocusLost => todo!(),
         Event::Paste(_) => todo!(),
         Event::Mouse(_) => todo!(),
-        Event::Resize(_, _) => todo!(),
+        Event::Resize(_, _) => None,
         Event::Key(key) => match key.code {
             KeyCode::Char(c) => {
                 if c == 'c' && key.modifiers.contains(KeyModifiers::CONTROL) {
