@@ -1,4 +1,14 @@
+use std::io::Write;
+
 use clap::Parser;
+use crossterm::cursor;
+use crossterm::event::{
+    Event, EventStream, KeyCode, KeyModifiers, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
+use crossterm::terminal;
+use crossterm::QueueableCommand;
+use futures::{future::FutureExt, StreamExt};
 use tokio::fs::File;
 use tokio::sync::mpsc;
 
@@ -22,8 +32,10 @@ enum Command {
 }
 
 pub fn main(args: Args) -> Result<()> {
-    let mut raw_mode = term::RawMode::new()?;
-    raw_mode.enable()?;
+    let supports_keyboard_enhancement =
+        matches!(terminal::supports_keyboard_enhancement(), Ok(true));
+    setup_panic_handler(supports_keyboard_enhancement);
+    terminal_enter(supports_keyboard_enhancement)?;
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -38,8 +50,49 @@ pub fn main(args: Args) -> Result<()> {
         }
 
         _ = app.await?;
-        Ok(())
-    })
+        Ok::<(), error::Error>(())
+    })?;
+
+    terminal_exit(supports_keyboard_enhancement)?;
+    Ok(())
+}
+
+fn terminal_enter(supports_keyboard_enhancement: bool) -> Result<()> {
+    let mut stdout = std::io::stdout();
+    terminal::enable_raw_mode()?;
+    let command_queue = stdout.queue(terminal::EnterAlternateScreen)?;
+    if supports_keyboard_enhancement {
+        command_queue.queue(PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
+        ))?;
+    }
+    command_queue.flush()?;
+    Ok(())
+}
+
+fn terminal_exit(supports_keyboard_enhancement: bool) -> Result<()> {
+    let mut stdout = std::io::stdout();
+    let command_queue = stdout
+        .queue(terminal::Clear(terminal::ClearType::All))?
+        .queue(terminal::LeaveAlternateScreen)?
+        .queue(cursor::Show)?;
+    if supports_keyboard_enhancement {
+        command_queue.queue(PopKeyboardEnhancementFlags)?;
+    }
+    command_queue.flush()?;
+    terminal::disable_raw_mode()?;
+    Ok(())
+}
+
+fn setup_panic_handler(supports_keyboard_enhancement: bool) {
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        _ = terminal_exit(supports_keyboard_enhancement);
+        default_panic(info);
+    }));
 }
 
 #[derive(Debug)]
@@ -57,7 +110,7 @@ impl State {
 }
 
 async fn app_main(mut command_rx: mpsc::Receiver<Command>) -> error::Result<()> {
-    let mut keyboard = term::KeyboardInput::new();
+    let mut event_stream = EventStream::new();
     let mut state = State::new();
     state.display.enable_alternate_screen().await?;
 
@@ -65,11 +118,17 @@ async fn app_main(mut command_rx: mpsc::Receiver<Command>) -> error::Result<()> 
         redraw_screen(&mut state).await?;
 
         let maybe_command = tokio::select! {
-            key = keyboard.read_key() => { process_key(key?) }
+            maybe_event = event_stream.next().fuse() => {
+                match maybe_event {
+                    Some(event) => process_event(event?),
+                    None => break 'main,
+                }
+            }
             maybe_command = command_rx.recv() => { maybe_command }
         };
 
         if let Some(command) = maybe_command {
+            use Command::*;
             match command {
                 Command::Quit => break 'main,
                 Command::FileOpen(p) => {
@@ -121,15 +180,21 @@ async fn redraw_screen(state: &mut State) -> error::Result<()> {
     Ok(())
 }
 
-fn process_key(key: term::Key) -> Option<Command> {
-    use term::Key::{Char, Ctrl};
-    match key {
-        Char(c) => {
-            println!("{}\r", c);
-            None
-        }
-        Ctrl(k) => match k {
-            b'q' | b'c' => Some(Command::Quit),
+fn process_event(event: Event) -> Option<Command> {
+    match event {
+        Event::FocusGained => todo!(),
+        Event::FocusLost => todo!(),
+        Event::Paste(_) => todo!(),
+        Event::Mouse(_) => todo!(),
+        Event::Resize(_, _) => todo!(),
+        Event::Key(key) => match key.code {
+            KeyCode::Char(c) => {
+                if c == 'c' && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    Some(Command::Quit)
+                } else {
+                    None
+                }
+            }
             _ => None,
         },
     }
