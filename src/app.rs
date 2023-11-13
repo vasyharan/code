@@ -11,8 +11,8 @@ use crossterm::terminal;
 use crossterm::QueueableCommand;
 use futures::{future::FutureExt, StreamExt};
 use ratatui::backend::CrosstermBackend;
-use ratatui::prelude::{Buffer, Layout, Rect};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::prelude::{Buffer, Rect};
+use ratatui::widgets::Widget;
 use ratatui::Terminal;
 use tokio::fs::File;
 use tokio::sync::mpsc;
@@ -151,7 +151,6 @@ async fn app_main(mut command_rx: mpsc::Receiver<Command>) -> error::Result<()> 
         };
 
         if let Some(command) = maybe_command {
-            use Command::*;
             match command {
                 Command::Quit => break 'main,
                 Command::FileOpen(p) => {

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use super::slice::{RopeLine, RopeSlice};
+use super::slice::RopeLine;
 use super::tree::{Node, NodeMetrics};
 use super::Rope;
 

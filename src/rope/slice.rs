@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use super::cursor::Chunks;
-use super::tree::NodeMetrics;
+
 use super::Rope;
 
 // #[derive(Debug, Clone)]
@@ -40,15 +40,15 @@ pub(crate) struct RopeSlice<'a> {
     range: Range<usize>,
 }
 
-impl<'a> RopeSlice<'a> {
-    pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
-        Self { rope, range }
-    }
+// impl<'a> RopeSlice<'a> {
+//     pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
+//         Self { rope, range }
+//     }
 
-    pub(crate) fn chunks(&self) -> Chunks<'a> {
-        Chunks::new(self.rope, self.range.clone())
-    }
-}
+//     pub(crate) fn chunks(&self) -> Chunks<'a> {
+//         Chunks::new(self.rope, self.range.clone())
+//     }
+// }
 
 pub(crate) struct RopeLine<'a>(RopeSlice<'a>);
 

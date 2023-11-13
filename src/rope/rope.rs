@@ -5,7 +5,6 @@ use std::sync::Arc;
 use super::block::BlockRange;
 use super::cursor::{Chunks, Lines};
 use super::error::{Error, Result};
-use super::slice::RopeSlice;
 use super::tree::{Node, NodeColour};
 use super::util;
 
@@ -41,6 +40,7 @@ impl Rope {
         Ok(Rope(root))
     }
 
+    #[allow(dead_code)]
     pub(super) fn split(&self, offset: usize) -> Result<(Rope, Rope)> {
         if offset > self.len() {
             return Err(Error::IndexOutOfBounds(offset, self.len()));
@@ -123,6 +123,7 @@ impl Rope {
     //     }
     // }
 
+    #[allow(dead_code)]
     pub(super) fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         write!(w, "digraph {{\n")?;
         self.0.write_dot(w)?;
@@ -134,15 +135,17 @@ impl Rope {
         self.0.is_balanced()
     }
 
+    #[allow(dead_code)]
     pub(super) fn to_bstring(&self) -> BString {
         self.0.to_bstring()
     }
 
-    fn slice<'a>(&'a self, range: impl RangeBounds<usize>) -> RopeSlice<'a> {
-        let range = util::bound_range(&range, 0..self.len());
-        RopeSlice::new(self, range)
-    }
+    // fn slice<'a>(&'a self, range: impl RangeBounds<usize>) -> RopeSlice<'a> {
+    //     let range = util::bound_range(&range, 0..self.len());
+    //     RopeSlice::new(self, range)
+    // }
 
+    #[allow(dead_code)]
     pub(crate) fn chunks(&self) -> Chunks {
         Chunks::new(self, 0..self.len())
     }
@@ -652,14 +655,6 @@ mod tests {
             "and ", "they", " ", "continue", " singing", " ", "i", "t", " ", "forever", " j", "us", "t ", "because...", "\n",
         ];
         for (i, actual) in rope.chunks().enumerate() {
-            let expected = parts.get(i).unwrap_or(&"");
-            assert_eq!(actual.as_bstr(), expected, "part={}", i);
-        }
-        for (i, actual) in rope.slice(11..).chunks().enumerate() {
-            let expected = parts.get(i + 3).unwrap_or(&"");
-            assert_eq!(actual.as_bstr(), expected, "part={}", i);
-        }
-        for (i, actual) in rope.slice(..172).chunks().enumerate() {
             let expected = parts.get(i).unwrap_or(&"");
             assert_eq!(actual.as_bstr(), expected, "part={}", i);
         }
