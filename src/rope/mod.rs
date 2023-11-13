@@ -8,5 +8,5 @@ mod tree;
 mod util;
 
 pub use self::block::{BlockBuffer, BlockRange};
-pub(crate) use self::error::{Error};
+pub(crate) use self::error::Error;
 pub use self::rope::Rope;

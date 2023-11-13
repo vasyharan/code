@@ -39,8 +39,7 @@ impl<'a> Iterator for Chunks<'a> {
         if let Node::Leaf { block_ref, metrics, .. } = leaf {
             let bytes = &block_ref.as_bytes()[leaf_start..];
             let chunk = if bytes.len() < self.range.len() {
-                let chunk = Some(bytes);
-                chunk
+                Some(bytes)
             } else {
                 let chunk = Some(&bytes[..(self.range.len())]);
                 if self.trim_last_terminator {

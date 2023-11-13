@@ -46,7 +46,7 @@ pub fn main(args: Args) -> error::Result<()> {
         let app = tokio::spawn(app_main(command_rx));
         if let Some(paths) = args.paths {
             for p in paths.iter() {
-                _ = command_tx.send(Command::FileOpen(p.clone())).await?;
+                command_tx.send(Command::FileOpen(p.clone())).await?;
             }
         }
 

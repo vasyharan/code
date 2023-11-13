@@ -1,4 +1,6 @@
+#![allow(clippy::module_inception)]
 use bstr::BString;
+use std::cmp::Ordering;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -32,7 +34,7 @@ impl Rope {
         if offset > self.len() {
             return Err(Error::IndexOutOfBounds(offset, self.len()));
         }
-        if text.len() == 0 {
+        if text.is_empty() {
             return Ok(self.clone());
         }
         let root = Arc::new(insert(&self.0, offset, text));
@@ -63,7 +65,7 @@ impl Rope {
             ));
         }
         let range = bounded_range;
-        if range.len() == 0 {
+        if range.is_empty() {
             let deleted = Self::empty();
             let updated = Self(self.0.clone());
             return Ok((updated, deleted));
@@ -125,9 +127,9 @@ impl Rope {
 
     #[allow(dead_code)]
     pub(super) fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
-        write!(w, "digraph {{\n")?;
+        writeln!(w, "digraph {{")?;
         self.0.write_dot(w)?;
-        write!(w, "}}")?;
+        writeln!(w, "}}")?;
         Ok(())
     }
 
@@ -247,6 +249,7 @@ fn balance(colour: NodeColour, left: Arc<Node>, right: Arc<Node>) -> (Node, bool
     (Node::new_branch(colour, left, right), false)
 }
 
+type NodeWithHeight = (Arc<Node>, usize);
 // if (TL.color=black) and (TL.blackHeight=TR.blackHeight):
 //         return Node(TL,⟨k,red⟩,TR)
 //     T'=Node(TL.left,⟨TL.key,TL.color⟩,joinRightRB(TL.right,k,TR))
@@ -254,7 +257,7 @@ fn balance(colour: NodeColour, left: Arc<Node>, right: Arc<Node>) -> (Node, bool
 //         T'.right.right.color=black;
 //         return rotateLeft(T')
 //     return T' /* T''[recte T'] */
-fn join_right(left: (Arc<Node>, usize), right: (Arc<Node>, usize)) -> (Arc<Node>, usize) {
+fn join_right(left: NodeWithHeight, right: NodeWithHeight) -> NodeWithHeight {
     let (left, lheight) = left;
     let (right, rheight) = right;
     debug_assert_eq!(lheight, black_height(left.as_ref()));
@@ -281,7 +284,7 @@ fn join_right(left: (Arc<Node>, usize), right: (Arc<Node>, usize)) -> (Arc<Node>
     }
 }
 
-fn join_left(left: (Arc<Node>, usize), right: (Arc<Node>, usize)) -> (Arc<Node>, usize) {
+fn join_left(left: NodeWithHeight, right: NodeWithHeight) -> NodeWithHeight {
     let (left, lheight) = left;
     let (right, rheight) = right;
     debug_assert_eq!(lheight, black_height(left.as_ref()));
@@ -311,9 +314,9 @@ fn join_left(left: (Arc<Node>, usize), right: (Arc<Node>, usize)) -> (Arc<Node>,
 }
 
 fn join(
-    maybe_left: Option<(Arc<Node>, usize)>,
-    maybe_right: Option<(Arc<Node>, usize)>,
-) -> Option<(Arc<Node>, usize)> {
+    maybe_left: Option<NodeWithHeight>,
+    maybe_right: Option<NodeWithHeight>,
+) -> Option<NodeWithHeight> {
     let joined = match (maybe_left.clone(), maybe_right.clone()) {
         (None, None) => None,
         (None, Some(right)) => Some(right.clone()),
@@ -323,38 +326,33 @@ fn join(
             debug_assert_eq!(rheight, black_height(right.as_ref()));
             // let lheight = black_height(left.as_ref());
             // let rheight = black_height(right.as_ref());
-            if rheight > lheight {
-                let (node, height) = join_left((left, lheight), (right, rheight));
-                Some((node, height))
-            } else if lheight > rheight {
-                let (node, height) = join_right((left, lheight), (right, rheight));
-                Some((node, height))
-            } else {
-                let colour =
-                    if left.colour() == NodeColour::Black && right.colour() == NodeColour::Black {
+            match rheight.cmp(&lheight) {
+                Ordering::Greater => join_left((left, lheight), (right, rheight)).into(),
+                Ordering::Less => join_right((left, lheight), (right, rheight)).into(),
+                Ordering::Equal => {
+                    let colour = if left.colour() == NodeColour::Black
+                        && right.colour() == NodeColour::Black
+                    {
                         NodeColour::Red
                     } else {
                         NodeColour::Black
                     };
 
-                let node = Node::new_branch(colour, left.clone(), right.clone());
-                Some((Arc::new(node), lheight + (colour.black_height() as usize)))
-                // let (node, _) = balance(colour, left.clone(), right.clone());
-                // Some((Arc::new(node), lheight + (colour.black_height() as usize)))
+                    let node = Node::new_branch(colour, left.clone(), right.clone());
+                    Some((Arc::new(node), lheight + (colour.black_height() as usize)))
+                }
             }
         }
     };
-    let joined = match joined {
+    match joined {
         Some((ref node, height)) if node.colour() == NodeColour::Red => {
             Some((make_black(node.clone()), height + 1))
         }
         x => x,
-    };
-    // debug_assert_join_balanced("join", &maybe_left, &maybe_right, &joined);
-    joined
+    }
 }
 
-fn split(node: &Node, at: usize) -> (Option<(Arc<Node>, usize)>, Option<(Arc<Node>, usize)>) {
+fn split(node: &Node, at: usize) -> (Option<NodeWithHeight>, Option<NodeWithHeight>) {
     let (left, right, _) = split_recurse(node, at);
     let left = match left {
         Some((ref node, height)) if node.colour() == NodeColour::Red => {
@@ -375,7 +373,7 @@ fn split(node: &Node, at: usize) -> (Option<(Arc<Node>, usize)>, Option<(Arc<Nod
 fn split_recurse(
     node: &Node,
     at: usize,
-) -> (Option<(Arc<Node>, usize)>, Option<(Arc<Node>, usize)>, usize) {
+) -> (Option<NodeWithHeight>, Option<NodeWithHeight>, usize) {
     match node {
         Empty => (None, None, 0),
         Leaf { block_ref, .. } => {

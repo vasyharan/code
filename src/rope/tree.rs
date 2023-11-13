@@ -165,19 +165,19 @@ impl Node {
     pub(super) fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         match self {
             Branch { colour, left, right, .. } => {
-                write!(w, "\tn{:p}[shape=circle,color={},label=\"\"];\n", self, colour)?;
+                writeln!(w, "\tn{:p}[shape=circle,color={},label=\"\"];", self, colour)?;
 
                 left.write_dot(w)?;
-                write!(w, "\tn{:p} -> n{:p}[label=\"{}\"];\n", self, left.as_ref(), left.len())?;
+                writeln!(w, "\tn{:p} -> n{:p}[label=\"{}\"];", self, left.as_ref(), left.len())?;
 
                 right.write_dot(w)?;
-                write!(w, "\tn{:p} -> n{:p}[label=\"{}\"];\n", self, right.as_ref(), right.len())?;
+                writeln!(w, "\tn{:p} -> n{:p}[label=\"{}\"];", self, right.as_ref(), right.len())?;
             }
             Leaf { block_ref, .. } => {
-                write!(w, "\tn{:p}[shape=square,label=\"len={}\"];\n", self, block_ref.len())?;
+                writeln!(w, "\tn{:p}[shape=square,label=\"len={}\"];", self, block_ref.len())?;
             }
             Empty => {
-                write!(w, "\tn{:p}[shape=square,label=\"len=0\"];\n", self)?;
+                writeln!(w, "\tn{:p}[shape=square,label=\"len=0\"];", self)?;
             }
         }
         Ok(())

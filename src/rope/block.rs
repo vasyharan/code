@@ -15,6 +15,10 @@ struct Bytes([u8; BLOCK_CAPACITY]); // TODO: tune size of byte array
 pub struct BlockRange(Arc<Bytes>, Range<usize>);
 
 impl BlockRange {
+    pub fn is_empty(&self) -> bool {
+    self.1.is_empty()
+    }
+
     pub fn len(&self) -> usize {
         self.1.len()
     }
@@ -49,6 +53,12 @@ pub struct BlockBuffer {
     head: usize,
 }
 
+impl Default for BlockBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockBuffer {
     pub fn new() -> Self {
         Self { block: Arc::new(Bytes([0; BLOCK_CAPACITY])), head: 0 }
@@ -60,7 +70,7 @@ impl BlockBuffer {
         let len = min(val.len(), rem);
         let mut bytes: &mut [u8] = unsafe {
             let bytes = (&block.as_ref().0 as *const u8) as *mut u8;
-            std::slice::from_raw_parts_mut(bytes.offset(head as isize), len)
+            std::slice::from_raw_parts_mut(bytes.add(head), len)
         };
         let written = bytes.write(&val[..len])?;
         self.head += written;
@@ -70,11 +80,11 @@ impl BlockBuffer {
 
     pub async fn read(&mut self, file: &mut File) -> std::io::Result<(BlockRange, usize)> {
         let (block, head, rem) = self.block_remaining();
-        let mut bytes: &mut [u8] = unsafe {
+        let bytes: &mut [u8] = unsafe {
             let bytes = (&block.as_ref().0 as *const u8) as *mut u8;
-            std::slice::from_raw_parts_mut(bytes.offset(head as isize), rem)
+            std::slice::from_raw_parts_mut(bytes.add(head), rem)
         };
-        let written = file.read(&mut bytes).await?;
+        let written = file.read(bytes).await?;
         self.head += written;
         let range = head..(head + written);
         Ok((BlockRange(block.clone(), range), written))
