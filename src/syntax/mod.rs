@@ -1,10 +1,10 @@
 use std::thread;
 
+use anyhow::{Error, Result};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tree_sitter as ts;
 
-use crate::error::Error;
 use crate::rope::{self, Chunks, Rope};
 
 pub(crate) mod highlighter;
@@ -46,16 +46,13 @@ pub(crate) enum SyntaxEvent {
     Hightlight(highlighter::Highlights),
 }
 
-struct Worker {
-    // thread_handle: thread::JoinHandle<Result<()>>,
-}
+#[derive(Debug)]
+struct Worker(thread::JoinHandle<Result<()>>);
 
 impl Worker {
     fn spawn(mut rx: mpsc::Receiver<Command>, tx: mpsc::Sender<SyntaxEvent>) -> Self {
         let thread_handle = thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                // .enable_all()
-                .build()?;
+            let rt = tokio::runtime::Builder::new_current_thread().build()?;
             rt.block_on(async {
                 let mut parser = ts::Parser::new();
 
@@ -84,22 +81,23 @@ impl Worker {
 
             Ok::<(), Error>(())
         });
-        Self {}
+        Self(thread_handle)
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct Client {
     cmd_tx: mpsc::Sender<Command>,
     event_rx: mpsc::Receiver<SyntaxEvent>,
-    // worker: Worker,
+    worker: Worker,
 }
 
 impl Client {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn spawn() -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::channel(1);
-        let _ = Worker::spawn(cmd_rx, event_tx);
-        Client { cmd_tx, event_rx }
+        let worker = Worker::spawn(cmd_rx, event_tx);
+        Client { cmd_tx, event_rx, worker }
     }
 
     pub(crate) async fn parse(

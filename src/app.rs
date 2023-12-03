@@ -1,5 +1,6 @@
-use std::io::Write;
+use std::io::{Stdout, Write};
 
+use anyhow::{Context, Error, Result};
 use clap::Parser;
 use crossterm::cursor;
 use crossterm::event::{
@@ -23,12 +24,13 @@ use crate::theme::Theme;
 use crate::{error, syntax};
 
 lazy_static! {
-    pub static ref PROJECT_NAME: String = env!("CARGO_CRATE_NAME").to_string();
-    pub static ref LOG_ENV: String = format!("{}_LOGLEVEL", PROJECT_NAME.clone().to_uppercase());
-    pub static ref LOG_FILE: String = format!("{}.log", env!("CARGO_PKG_NAME"));
+    pub(crate) static ref PROJECT_NAME: String = env!("CARGO_CRATE_NAME").to_string();
+    pub(crate) static ref LOG_ENV: String =
+        format!("{}_LOGLEVEL", PROJECT_NAME.clone().to_uppercase());
+    pub(crate) static ref LOG_FILE: String = format!("{}.log", env!("CARGO_PKG_NAME"));
 }
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 pub struct Args {
     /// Paths to files to open
     paths: Option<Vec<std::path::PathBuf>>,
@@ -40,34 +42,39 @@ pub(crate) enum Command {
     Quit,
 }
 
-pub fn main(args: Args) -> error::Result<()> {
+#[derive(Debug, Default)]
+pub(crate) struct AppContext {
+    pub(crate) theme: Theme,
+    pub(crate) buffer: Buffer,
+}
+
+pub fn main(args: Args) -> Result<()> {
     let supports_keyboard_enhancement =
         matches!(terminal::supports_keyboard_enhancement(), Ok(true));
     setup_panic_handler(supports_keyboard_enhancement);
     setup_logging()?;
     terminal_enter(supports_keyboard_enhancement)?;
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        // .enable_all()
-        .build()?;
+    let rt = tokio::runtime::Builder::new_current_thread().build()?;
     rt.block_on(async move {
         let (cmd_tx, cmd_rx) = mpsc::channel(1);
-        let app = tokio::spawn(app_main(cmd_rx));
+        let main_loop = tokio::spawn(main_loop(cmd_rx));
         if let Some(paths) = args.paths {
             for p in paths.iter() {
                 cmd_tx.send(Command::FileOpen(p.clone())).await?;
             }
         }
 
-        _ = app.await?;
-        Ok::<(), error::Error>(())
-    })?;
+        _ = main_loop.await?;
+        Ok::<(), anyhow::Error>(())
+    })
+    .context("app main loop")?;
 
     terminal_exit(supports_keyboard_enhancement)?;
     Ok(())
 }
 
-fn terminal_enter(supports_keyboard_enhancement: bool) -> error::Result<()> {
+fn terminal_enter(supports_keyboard_enhancement: bool) -> Result<()> {
     let mut stdout = std::io::stdout();
     terminal::enable_raw_mode()?;
     let command_queue = stdout.queue(terminal::EnterAlternateScreen)?;
@@ -83,7 +90,7 @@ fn terminal_enter(supports_keyboard_enhancement: bool) -> error::Result<()> {
     Ok(())
 }
 
-fn terminal_exit(supports_keyboard_enhancement: bool) -> error::Result<()> {
+fn terminal_exit(supports_keyboard_enhancement: bool) -> Result<()> {
     let mut stdout = std::io::stdout();
     let command_queue = stdout
         .queue(terminal::Clear(terminal::ClearType::All))?
@@ -105,7 +112,7 @@ fn setup_panic_handler(supports_keyboard_enhancement: bool) {
     }));
 }
 
-fn setup_logging() -> error::Result<()> {
+fn setup_logging() -> Result<()> {
     use tracing_subscriber::fmt::format::FmtSpan;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
@@ -145,33 +152,19 @@ fn setup_logging() -> error::Result<()> {
     Ok(())
 }
 
-#[derive(Debug)]
-struct State {
-    theme: Theme,
-    buffer: Buffer,
-}
-
-impl State {
-    fn new() -> Self {
-        Self { theme: Theme::default(), buffer: Buffer::empty() }
-    }
-}
-
-async fn app_main(mut app_rx: mpsc::Receiver<Command>) -> error::Result<()> {
-    let mut syntax = syntax::Client::new();
-
-    let mut input = EventStream::new();
+async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> error::Result<()> {
     let mut term = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
-    let mut state = State::new();
-    let ui = crate::widgets::EditorPane::new();
+    let mut input = EventStream::new();
+    let mut syntax = syntax::Client::spawn();
+    let mut context = AppContext::default();
 
     'main: loop {
-        term.draw(|f| {
-            let style = tui::Style::default().bg(state.theme.bg().0);
-            let rect = f.size();
-            f.buffer_mut().set_style(rect, style);
-            f.render_stateful_widget(&ui, f.size(), &mut state.buffer);
-            f.set_cursor(0, 0);
+        term.draw(|frame| {
+            let root = crate::widgets::EditorPane::new(&context);
+            let style = tui::Style::default().bg(context.theme.bg().0);
+            let rect = frame.size();
+            frame.buffer_mut().set_style(rect, style);
+            frame.render_widget(root, rect);
         })?;
 
         let maybe_command = tokio::select! {
@@ -183,7 +176,7 @@ async fn app_main(mut app_rx: mpsc::Receiver<Command>) -> error::Result<()> {
             }
             maybe_syntax_event = syntax.next().fuse() => {
                 match maybe_syntax_event {
-                    Some(event) => process_syntax(&mut state, event),
+                    Some(event) => process_syntax(&mut context, event),
                     None => panic!("syntax thread crashed?")
                 }
              }
@@ -196,11 +189,11 @@ async fn app_main(mut app_rx: mpsc::Receiver<Command>) -> error::Result<()> {
             match command {
                 Quit => break 'main,
                 FileOpen(p) => {
-                    state.buffer = file_open(p).await?;
-                    match Language::try_from(&state.buffer) {
+                    context.buffer = file_open(p).await?;
+                    match Language::try_from(&context.buffer) {
                         Ok(language) => {
                             syntax
-                                .parse(language, state.buffer.contents.clone())
+                                .parse(language, context.buffer.contents.clone())
                                 .await?;
                             ()
                         }
@@ -215,11 +208,11 @@ async fn app_main(mut app_rx: mpsc::Receiver<Command>) -> error::Result<()> {
 }
 
 #[tracing::instrument]
-fn process_syntax(state: &mut State, event: syntax::SyntaxEvent) -> Option<Command> {
+fn process_syntax(context: &mut AppContext, event: syntax::SyntaxEvent) -> Option<Command> {
     match event {
         syntax::SyntaxEvent::Parsed(_) => None,
         syntax::SyntaxEvent::Hightlight(hls) => {
-            state.buffer.highlights = hls;
+            context.buffer.highlights = hls;
             None
         }
     }

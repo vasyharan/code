@@ -23,3 +23,9 @@ impl Buffer {
         Self { path: Some(path), contents, highlights }
     }
 }
+
+impl Default for Buffer {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
