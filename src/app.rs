@@ -1,4 +1,4 @@
-use std::io::{Stdout, Write};
+use std::io::Write;
 
 use anyhow::{Context, Error, Result};
 use clap::Parser;
@@ -14,10 +14,12 @@ use lazy_static::lazy_static;
 use ratatui::backend::CrosstermBackend;
 use ratatui::prelude as tui;
 use ratatui::Terminal;
+use slotmap::{new_key_type, SlotMap};
 use tokio::fs::File;
 use tokio::sync::mpsc;
 
 use crate::buffer::Buffer;
+use crate::editor::EditorContext;
 use crate::rope::{self, Rope};
 use crate::syntax::language::Language;
 use crate::theme::Theme;
@@ -39,13 +41,44 @@ pub struct Args {
 #[derive(Debug)]
 pub(crate) enum Command {
     FileOpen(std::path::PathBuf),
+
+    CursorUp,
+    CursorDown,
+    CursorRight,
+    CursorLeft,
+
     Quit,
 }
 
-#[derive(Debug, Default)]
+new_key_type! {
+    pub(crate) struct BufferId;
+}
+
+#[derive(Debug)]
 pub(crate) struct AppContext {
     pub(crate) theme: Theme,
-    pub(crate) buffer: Buffer,
+    pub(crate) editor: EditorContext,
+
+    buffers: SlotMap<BufferId, Buffer>,
+}
+
+impl AppContext {
+    pub(crate) fn buffer_create(&mut self, buffer: Buffer) -> BufferId {
+        self.buffers.insert(buffer)
+    }
+}
+
+impl Default for AppContext {
+    fn default() -> Self {
+        let mut buffers = SlotMap::with_key();
+        let buffer_id: BufferId = buffers.insert(Buffer::default());
+
+        Self {
+            theme: Default::default(),
+            buffers,
+            editor: EditorContext { buffer_id, cursor_pos: Default::default() },
+        }
+    }
 }
 
 pub fn main(args: Args) -> Result<()> {
@@ -66,9 +99,9 @@ pub fn main(args: Args) -> Result<()> {
         }
 
         _ = main_loop.await?;
-        Ok::<(), anyhow::Error>(())
+        Ok::<(), Error>(())
     })
-    .context("app main loop")?;
+    .context("block on")?;
 
     terminal_exit(supports_keyboard_enhancement)?;
     Ok(())
@@ -76,7 +109,7 @@ pub fn main(args: Args) -> Result<()> {
 
 fn terminal_enter(supports_keyboard_enhancement: bool) -> Result<()> {
     let mut stdout = std::io::stdout();
-    terminal::enable_raw_mode()?;
+    terminal::enable_raw_mode().context("enable raw mode")?;
     let command_queue = stdout.queue(terminal::EnterAlternateScreen)?;
     if supports_keyboard_enhancement {
         command_queue.queue(PushKeyboardEnhancementFlags(
@@ -86,7 +119,7 @@ fn terminal_enter(supports_keyboard_enhancement: bool) -> Result<()> {
                 | KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
         ))?;
     }
-    command_queue.flush()?;
+    command_queue.flush().context("setup terminal")?;
     Ok(())
 }
 
@@ -99,8 +132,8 @@ fn terminal_exit(supports_keyboard_enhancement: bool) -> Result<()> {
     if supports_keyboard_enhancement {
         command_queue.queue(PopKeyboardEnhancementFlags)?;
     }
-    command_queue.flush()?;
-    terminal::disable_raw_mode()?;
+    command_queue.flush().context("reset terminal")?;
+    terminal::disable_raw_mode().context("disable raw mode")?;
     Ok(())
 }
 
@@ -160,17 +193,26 @@ async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> error::Result<()> {
 
     'main: loop {
         term.draw(|frame| {
-            let root = crate::widgets::EditorPane::new(&context);
+            let area = frame.size();
             let style = tui::Style::default().bg(context.theme.bg().0);
-            let rect = frame.size();
-            frame.buffer_mut().set_style(rect, style);
-            frame.render_widget(root, rect);
+            frame.buffer_mut().set_style(area, style);
+
+            // let buffer = context.buffers[]
+            let buffer = &context.buffers[context.editor.buffer_id];
+            let root = crate::widgets::EditorPane {
+                buffer,
+                theme: &context.theme,
+                context: &context.editor,
+            };
+            let cursor_pos = root.screen_cursor_position((area.width, area.height));
+            frame.render_widget(root, area);
+            frame.set_cursor(cursor_pos.0, cursor_pos.1);
         })?;
 
         let maybe_command = tokio::select! {
             maybe_input_event = input.next().fuse() => {
                 match maybe_input_event {
-                    Some(event) => process_event(event?),
+                    Some(event) => process_event(&context, event?),
                     None => break 'main,
                 }
             }
@@ -189,17 +231,26 @@ async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> error::Result<()> {
             match command {
                 Quit => break 'main,
                 FileOpen(p) => {
-                    context.buffer = file_open(p).await?;
-                    match Language::try_from(&context.buffer) {
+                    let buffer = file_open(p).await?;
+                    let contents = buffer.contents.clone();
+                    let buffer_id = context.buffer_create(buffer);
+                    let buffer = &context.buffers[buffer_id];
+                    match Language::try_from(buffer) {
                         Ok(language) => {
                             syntax
-                                .parse(language, context.buffer.contents.clone())
+                                .send(syntax::Command::Parse { buffer_id, contents, language })
                                 .await?;
                             ()
                         }
                         _ => (),
                     }
+
+                    context.editor = EditorContext::new_buffer(buffer_id);
                 }
+                CursorUp => context.editor.cursor_up(),
+                CursorDown => context.editor.cursor_down(),
+                CursorRight => context.editor.cursor_right(),
+                CursorLeft => context.editor.cursor_left(),
             }
         }
     }
@@ -210,16 +261,16 @@ async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> error::Result<()> {
 #[tracing::instrument]
 fn process_syntax(context: &mut AppContext, event: syntax::SyntaxEvent) -> Option<Command> {
     match event {
-        syntax::SyntaxEvent::Parsed(_) => None,
-        syntax::SyntaxEvent::Hightlight(hls) => {
-            context.buffer.highlights = hls;
-            None
+        syntax::SyntaxEvent::Parsed(..) => (),
+        syntax::SyntaxEvent::Hightlight(buffer_id, hls) => {
+            context.buffers[buffer_id].highlights = hls;
         }
     }
+    None
 }
 
 #[tracing::instrument]
-fn process_event(event: Event) -> Option<Command> {
+fn process_event(_: &AppContext, event: Event) -> Option<Command> {
     match event {
         Event::FocusGained => todo!(),
         Event::FocusLost => todo!(),
@@ -227,6 +278,10 @@ fn process_event(event: Event) -> Option<Command> {
         Event::Mouse(_) => todo!(),
         Event::Resize(_, _) => None,
         Event::Key(key) => match key.code {
+            KeyCode::Up => Some(Command::CursorUp),
+            KeyCode::Down => Some(Command::CursorDown),
+            KeyCode::Left => Some(Command::CursorLeft),
+            KeyCode::Right => Some(Command::CursorRight),
             KeyCode::Char(c) => {
                 if c == 'c' && key.modifiers.contains(KeyModifiers::CONTROL) {
                     Some(Command::Quit)

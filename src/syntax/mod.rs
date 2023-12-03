@@ -5,7 +5,10 @@ use futures::Stream;
 use tokio::sync::mpsc;
 use tree_sitter as ts;
 
-use crate::rope::{self, Chunks, Rope};
+use crate::{
+    app::BufferId,
+    rope::{self, Chunks, Rope},
+};
 
 pub(crate) mod highlighter;
 pub(crate) mod language;
@@ -37,13 +40,17 @@ impl<'a> ts::TextProvider<'a> for RopeTextProvider<'a> {
 
 #[derive(Debug)]
 pub(crate) enum Command {
-    Parse { contents: Rope, language: Language },
+    Parse {
+        buffer_id: BufferId,
+        contents: Rope,
+        language: Language,
+    },
 }
 
 #[derive(Debug)]
 pub(crate) enum SyntaxEvent {
-    Parsed(ts::Tree),
-    Hightlight(highlighter::Highlights),
+    Parsed(BufferId, ts::Tree),
+    Hightlight(BufferId, highlighter::Highlights),
 }
 
 #[derive(Debug)]
@@ -59,7 +66,7 @@ impl Worker {
                 while let Some(ev) = rx.recv().await {
                     use Command::*;
                     match ev {
-                        Parse { contents, language } => {
+                        Parse { buffer_id, contents, language } => {
                             let span = tracing::info_span!("parse_ts_tree").entered();
                             parser
                                 .set_language(language.ts)
@@ -68,11 +75,13 @@ impl Worker {
                             let tree = parser
                                 .parse_with(&mut ts_text.parse_callback(), None)
                                 .expect("expected a valid tree");
-                            tx.send(SyntaxEvent::Parsed(tree.clone())).await?;
+                            tx.send(SyntaxEvent::Parsed(buffer_id, tree.clone()))
+                                .await?;
                             drop(span);
 
                             let highlights = highlighter::highlight(&contents, language, tree);
-                            tx.send(SyntaxEvent::Hightlight(highlights)).await?;
+                            tx.send(SyntaxEvent::Hightlight(buffer_id, highlights))
+                                .await?;
                         }
                     }
                 }
@@ -100,14 +109,11 @@ impl Client {
         Client { cmd_tx, event_rx, worker }
     }
 
-    pub(crate) async fn parse(
+    pub(crate) async fn send(
         &self,
-        language: Language,
-        contents: rope::Rope,
+        command: Command,
     ) -> std::result::Result<(), mpsc::error::SendError<Command>> {
-        self.cmd_tx
-            .send(Command::Parse { contents, language })
-            .await
+        self.cmd_tx.send(command).await
     }
 }
 

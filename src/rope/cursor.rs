@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn lines_empty_rope() {
         let rope = Rope::empty();
-        for line in rope.lines() {
+        for line in rope.lines(..) {
             let mut it = line.chunks(..);
             assert_eq!(it.next(), None);
         }
@@ -459,7 +459,7 @@ mod tests {
             vec![],
         ];
 
-        let mut lineiter = rope.lines();
+        let mut lineiter = rope.lines(..);
         for (linenum, expected) in expected.iter().enumerate() {
             let mut actual = Vec::with_capacity(chunks.len());
             println!("line={}", linenum);

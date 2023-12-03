@@ -2,6 +2,7 @@ pub mod app;
 pub mod rope;
 
 mod buffer;
+mod editor;
 mod error;
 mod syntax;
 mod theme;

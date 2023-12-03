@@ -162,8 +162,9 @@ impl Rope {
         ChunkAndRanges::new(self, range)
     }
 
-    pub(crate) fn lines(&self) -> Lines {
-        Lines::new(self, 0..self.num_lines())
+    pub(crate) fn lines(&self, range: impl RangeBounds<usize>) -> Lines {
+        let range = util::bound_range(&range, 0..self.num_lines());
+        Lines::new(self, range)
     }
 
     // fn lines(&self, range: impl RangeBounds<usize>) -> Lines {
@@ -676,7 +677,7 @@ mod tests {
         }
 
         assert_eq!(rope.num_lines(), 6);
-        for (i, line) in rope.lines().enumerate() {
+        for (i, line) in rope.lines(..).enumerate() {
             let line = line
                 .chunks(..)
                 .fold(BString::new(Vec::with_capacity(64)), |s, part| {
