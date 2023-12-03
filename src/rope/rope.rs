@@ -5,7 +5,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use super::block::BlockRange;
-use super::cursor::{Chunks, Lines};
+use super::cursor::{ChunkAndRanges, Chunks, Lines};
 use super::error::{Error, Result};
 use super::tree::{Node, NodeColour};
 use super::util;
@@ -28,6 +28,10 @@ impl Rope {
 
     pub(super) fn num_lines(&self) -> usize {
         self.0.num_lines() + 1
+    }
+
+    pub fn append(&self, text: BlockRange) -> Result<Self> {
+        self.insert(self.len(), text)
     }
 
     pub fn insert(&self, offset: usize, text: BlockRange) -> Result<Self> {
@@ -147,9 +151,15 @@ impl Rope {
     //     RopeSlice::new(self, range)
     // }
 
+    pub(crate) fn chunks(&self, range: impl RangeBounds<usize>) -> Chunks {
+        let range = util::bound_range(&range, 0..self.len());
+        Chunks::new(self, range)
+    }
+
     #[allow(dead_code)]
-    pub(crate) fn chunks(&self) -> Chunks {
-        Chunks::new(self, 0..self.len())
+    pub(crate) fn chunk_and_ranges(&self, range: impl RangeBounds<usize>) -> ChunkAndRanges {
+        let range = util::bound_range(&range, 0..self.len());
+        ChunkAndRanges::new(self, range)
     }
 
     pub(crate) fn lines(&self) -> Lines {
@@ -652,7 +662,15 @@ mod tests {
             "not ", "knowing ", "what", " it", " was;\n",
             "and ", "they", " ", "continue", " singing", " ", "i", "t", " ", "forever", " j", "us", "t ", "because...", "\n",
         ];
-        for (i, actual) in rope.chunks().enumerate() {
+        for (i, actual) in rope.chunks(..).enumerate() {
+            let expected = parts.get(i).unwrap_or(&"");
+            assert_eq!(actual.as_bstr(), expected, "part={}", i);
+        }
+        for (i, actual) in rope.chunks(11..).enumerate() {
+            let expected = parts.get(i + 3).unwrap_or(&"");
+            assert_eq!(actual.as_bstr(), expected, "part={}", i);
+        }
+        for (i, actual) in rope.chunks(..172).enumerate() {
             let expected = parts.get(i).unwrap_or(&"");
             assert_eq!(actual.as_bstr(), expected, "part={}", i);
         }
@@ -660,7 +678,7 @@ mod tests {
         assert_eq!(rope.num_lines(), 6);
         for (i, line) in rope.lines().enumerate() {
             let line = line
-                .chunks()
+                .chunks(..)
                 .fold(BString::new(Vec::with_capacity(64)), |s, part| {
                     [s, part.as_bstr().into()].concat().into()
                 });

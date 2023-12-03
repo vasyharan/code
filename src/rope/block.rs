@@ -16,7 +16,7 @@ pub struct BlockRange(Arc<Bytes>, Range<usize>);
 
 impl BlockRange {
     pub fn is_empty(&self) -> bool {
-    self.1.is_empty()
+        self.1.is_empty()
     }
 
     pub fn len(&self) -> usize {
