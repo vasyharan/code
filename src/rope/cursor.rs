@@ -6,14 +6,14 @@ use super::Rope;
 
 type LeafOffset<'a> = (&'a Node, usize);
 
-pub(crate) struct Chunks<'a> {
+pub(crate) struct ChunkAndRanges<'a> {
     range: Range<usize>,
     parents: Vec<&'a Node>,
     curr_pos: Option<LeafOffset<'a>>,
     trim_last_terminator: bool,
 }
 
-impl<'a> Chunks<'a> {
+impl<'a> ChunkAndRanges<'a> {
     pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
         let mut parents = vec![];
         let (leaf, _) = leaf_at_byte_offset(&mut parents, rope.0.as_ref(), range.start);
@@ -27,8 +27,8 @@ impl<'a> Chunks<'a> {
     }
 }
 
-impl<'a> Iterator for Chunks<'a> {
-    type Item = &'a [u8];
+impl<'a> Iterator for ChunkAndRanges<'a> {
+    type Item = (&'a [u8], Range<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.range.is_empty() || self.curr_pos.is_none() {
@@ -49,12 +49,38 @@ impl<'a> Iterator for Chunks<'a> {
                 }
             };
 
-            self.curr_pos = next_leaf(&mut self.parents, leaf);
-            self.range = (self.range.start + metrics.len - leaf_start)..self.range.end;
-            chunk
+            if let Some(chunk) = chunk {
+                let chunk_range = self.range.start..(self.range.start + chunk.len());
+                self.curr_pos = next_leaf(&mut self.parents, leaf);
+                self.range = (self.range.start + metrics.len - leaf_start)..self.range.end;
+
+                Some((chunk, chunk_range))
+            } else {
+                None
+            }
         } else {
             unreachable!()
         }
+    }
+}
+
+pub(crate) struct Chunks<'a>(ChunkAndRanges<'a>);
+
+impl<'a> Chunks<'a> {
+    pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
+        Self(ChunkAndRanges::new(rope, range))
+    }
+
+    pub(super) fn new_trim_last_terminator(rope: &'a Rope, range: Range<usize>) -> Self {
+        Self(ChunkAndRanges::new_trim_last_terminator(rope, range))
+    }
+}
+
+impl<'a> Iterator for Chunks<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(chunk, _)| chunk)
     }
 }
 
@@ -285,7 +311,7 @@ mod tests {
     fn lines_empty_rope() {
         let rope = Rope::empty();
         for line in rope.lines() {
-            let mut it = line.chunks();
+            let mut it = line.chunks(..);
             assert_eq!(it.next(), None);
         }
     }
@@ -293,7 +319,7 @@ mod tests {
     #[test]
     fn chunks_empty_rope() {
         let rope = Rope::empty();
-        let mut it = rope.chunks();
+        let mut it = rope.chunks(..);
         assert_eq!(it.next(), None);
     }
 
@@ -340,9 +366,24 @@ mod tests {
             ),
         ));
 
-        let it = rope.chunks();
+        let it = rope.chunks(..);
         for (i, (expected, actual)) in chunks.iter().zip(it).enumerate() {
             assert_eq!(actual.as_bstr(), expected.as_bstr(), "chunk={}", i);
+        }
+
+        let lens: Vec<usize> = (std::iter::once(0).chain(chunks.iter().map(|c| c.len())))
+            .scan(0, |acc, x| {
+                *acc += x;
+                Some(*acc)
+            })
+            .collect();
+        let ranges = lens.iter().zip(lens.iter().skip(1)).map(|(s, e)| *s..*e);
+        let expected = chunks.iter().zip(ranges);
+
+        let it = rope.chunk_and_ranges(..);
+        for (i, (expected, actual)) in expected.zip(it).enumerate() {
+            assert_eq!(actual.0.as_bstr(), expected.0.as_bstr(), "chunk={}", i);
+            assert_eq!(actual.1, expected.1);
         }
     }
 
@@ -423,7 +464,7 @@ mod tests {
             let mut actual = Vec::with_capacity(chunks.len());
             println!("line={}", linenum);
             let line = lineiter.next().unwrap();
-            for chunk in line.chunks() {
+            for chunk in line.chunks(..) {
                 actual.push(chunk.as_bstr());
             }
             assert_eq!(actual, *expected, "line={}", linenum)

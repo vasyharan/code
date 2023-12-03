@@ -7,17 +7,43 @@ version = "0.1.0"
 [dependencies]
 bstr = "1.7.0"
 bytecount = "0.6.7"
-clap = {version = "4.0", features = ["derive"]}
-crossterm = {version = "0.27.0", default-features = false, features = ["event-stream", "bracketed-paste"]}
+clap = { version = "4.0", features = ["derive"] }
+crossterm = { version = "0.27.0", default-features = false, features = [
+    "event-stream",
+    "bracketed-paste",
+] }
 futures = "0.3.29"
+iset = "0.2.2"
+lazy_static = "1.4.0"
 memchr = "2.6.4"
-ratatui = {version = "0.24.0", default-features = false, features = ["crossterm"]}
+ratatui = { version = "0.24.0", default-features = false, features = [
+    "crossterm",
+] }
 term_size = "0.3"
 termios = "0.3"
-tokio = {version = "1", default-features = false, features = ["macros", "rt-multi-thread", "sync", "io-std", "io-util", "fs"]}
+tokio = { version = "1", default-features = false, features = [
+    "macros",
+    "rt-multi-thread",
+    "sync",
+    "io-std",
+    "io-util",
+    "fs",
+    "tracing",
+] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+tree-sitter = "0.20.10"
+tree-sitter-rust = "0.20.4"
+xdg = "2.5.2"
 
 [dev-dependencies]
-rand = {version = "0.8", default-features = false, features = ["getrandom", "small_rng"]}
+rand = { version = "0.8", default-features = false, features = [
+    "getrandom",
+    "small_rng",
+] }
+
+[build-dependencies]
+cc = "*"
 
 [lib]
 doctest = false

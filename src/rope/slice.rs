@@ -1,8 +1,8 @@
-use std::ops::Range;
+use std::ops::{Range, RangeBounds};
 
-use super::cursor::Chunks;
+use super::cursor::{ChunkAndRanges, Chunks};
 
-use super::Rope;
+use super::{util, Rope};
 
 // #[derive(Debug, Clone)]
 // pub enum RopeRange {
@@ -45,8 +45,9 @@ pub(crate) struct RopeSlice<'a> {
 //         Self { rope, range }
 //     }
 
-//     pub(crate) fn chunks(&self) -> Chunks<'a> {
-//         Chunks::new(self.rope, self.range.clone())
+//     pub(crate) fn chunks(&self, range: impl RangeBounds<usize>) -> Chunks<'a> {
+//         let range = util::bound_range(&range, self.range.clone());
+//         Chunks::new(self.rope, range)
 //     }
 // }
 
@@ -57,7 +58,14 @@ impl<'a> RopeLine<'a> {
         RopeLine(RopeSlice { rope, range })
     }
 
-    pub(crate) fn chunks(&self) -> Chunks<'a> {
-        Chunks::new_trim_last_terminator(self.0.rope, self.0.range.clone())
+    #[allow(dead_code)]
+    pub(crate) fn chunks(&self, range: impl RangeBounds<usize>) -> Chunks<'a> {
+        let range = util::bound_range(&range, self.0.range.clone());
+        Chunks::new_trim_last_terminator(self.0.rope, range)
+    }
+
+    pub fn chunk_and_ranges(&self, range: impl RangeBounds<usize>) -> ChunkAndRanges<'a> {
+        let range = util::bound_range(&range, self.0.range.clone());
+        ChunkAndRanges::new_trim_last_terminator(self.0.rope, range)
     }
 }
