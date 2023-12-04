@@ -7,6 +7,13 @@ pub enum Error {
     IndexOutOfBounds(usize, usize),
     RangeOutOfBounds(Bound<usize>, Bound<usize>, usize),
 }
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Error {}
 
 impl Error {
     pub(super) fn deref_bound<T: Copy>(b: Bound<&T>) -> Bound<T> {

@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Result};
 use clap::Parser;
 use crossterm::cursor;
 use crossterm::event::{
@@ -21,9 +21,8 @@ use tokio::sync::mpsc;
 use crate::buffer::Buffer;
 use crate::editor::EditorContext;
 use crate::rope::{self, Rope};
-use crate::syntax::language::Language;
+use crate::syntax::{self, language::Language};
 use crate::theme::Theme;
-use crate::{error, syntax};
 
 lazy_static! {
     pub(crate) static ref PROJECT_NAME: String = env!("CARGO_CRATE_NAME").to_string();
@@ -89,7 +88,7 @@ pub fn main(args: Args) -> Result<()> {
     terminal_enter(supports_keyboard_enhancement)?;
 
     let rt = tokio::runtime::Builder::new_current_thread().build()?;
-    rt.block_on(async move {
+    let res = rt.block_on(async move {
         let (cmd_tx, cmd_rx) = mpsc::channel(1);
         let main_loop = tokio::spawn(main_loop(cmd_rx));
         if let Some(paths) = args.paths {
@@ -98,13 +97,11 @@ pub fn main(args: Args) -> Result<()> {
             }
         }
 
-        _ = main_loop.await?;
-        Ok::<(), Error>(())
-    })
-    .context("block on")?;
+        return main_loop.await?;
+    });
 
     terminal_exit(supports_keyboard_enhancement)?;
-    Ok(())
+    res
 }
 
 fn terminal_enter(supports_keyboard_enhancement: bool) -> Result<()> {
@@ -185,7 +182,7 @@ fn setup_logging() -> Result<()> {
     Ok(())
 }
 
-async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> error::Result<()> {
+async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> Result<()> {
     let mut term = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
     let mut input = EventStream::new();
     let mut syntax = syntax::Client::spawn();
@@ -295,7 +292,7 @@ fn process_event(_: &AppContext, event: Event) -> Option<Command> {
 }
 
 #[tracing::instrument]
-async fn file_open(path: std::path::PathBuf) -> error::Result<Buffer> {
+async fn file_open(path: std::path::PathBuf) -> Result<Buffer> {
     let mut blocks = rope::BlockBuffer::new();
     let mut file = File::open(&path).await?;
     let mut rope = Rope::empty();
