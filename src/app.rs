@@ -19,7 +19,7 @@ use tokio::fs::File;
 use tokio::sync::mpsc;
 
 use crate::buffer::Buffer;
-use crate::editor::EditorContext;
+use crate::editor::{self, EditorContext};
 use crate::rope::{self, Rope};
 use crate::syntax::{self, language::Language};
 use crate::theme::Theme;
@@ -39,14 +39,10 @@ pub struct Args {
 
 #[derive(Debug)]
 pub(crate) enum Command {
+    Quit,
     FileOpen(std::path::PathBuf),
 
-    CursorUp,
-    CursorDown,
-    CursorRight,
-    CursorLeft,
-
-    Quit,
+    EditorCommand(editor::Command),
 }
 
 new_key_type! {
@@ -72,11 +68,7 @@ impl Default for AppContext {
         let mut buffers = SlotMap::with_key();
         let buffer_id: BufferId = buffers.insert(Buffer::default());
 
-        Self {
-            theme: Default::default(),
-            buffers,
-            editor: EditorContext { buffer_id, cursor_pos: Default::default() },
-        }
+        Self { theme: Default::default(), buffers, editor: EditorContext::new_buffer(buffer_id) }
     }
 }
 
@@ -244,10 +236,7 @@ async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> Result<()> {
 
                     context.editor = EditorContext::new_buffer(buffer_id);
                 }
-                CursorUp => context.editor.cursor_up(),
-                CursorDown => context.editor.cursor_down(),
-                CursorRight => context.editor.cursor_right(),
-                CursorLeft => context.editor.cursor_left(),
+                EditorCommand(command) => context.editor.command(command),
             }
         }
     }
@@ -267,27 +256,26 @@ fn process_syntax(context: &mut AppContext, event: syntax::SyntaxEvent) -> Optio
 }
 
 #[tracing::instrument]
-fn process_event(_: &AppContext, event: Event) -> Option<Command> {
+fn process_event(ctx: &AppContext, event: Event) -> Option<Command> {
     match event {
         Event::FocusGained => todo!(),
         Event::FocusLost => todo!(),
         Event::Paste(_) => todo!(),
         Event::Mouse(_) => todo!(),
         Event::Resize(_, _) => None,
-        Event::Key(key) => match key.code {
-            KeyCode::Up => Some(Command::CursorUp),
-            KeyCode::Down => Some(Command::CursorDown),
-            KeyCode::Left => Some(Command::CursorLeft),
-            KeyCode::Right => Some(Command::CursorRight),
-            KeyCode::Char(c) => {
-                if c == 'c' && key.modifiers.contains(KeyModifiers::CONTROL) {
-                    Some(Command::Quit)
-                } else {
-                    None
+        Event::Key(key) => {
+            let global_command = match key.code {
+                KeyCode::Char(c) => {
+                    if c == 'c' && key.modifiers.contains(KeyModifiers::CONTROL) {
+                        Some(Command::Quit)
+                    } else {
+                        None
+                    }
                 }
-            }
-            _ => None,
-        },
+                _ => None,
+            };
+            global_command.or_else(|| ctx.editor.process_key(key).map(Command::EditorCommand))
+        }
     }
 }
 
