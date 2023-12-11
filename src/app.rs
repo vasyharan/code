@@ -9,6 +9,7 @@ use crossterm::event::{
 };
 use crossterm::terminal;
 use crossterm::QueueableCommand;
+use futures::TryFutureExt;
 use futures::{future::FutureExt, StreamExt};
 use lazy_static::lazy_static;
 use ratatui::backend::CrosstermBackend;
@@ -94,84 +95,6 @@ pub fn main(args: Args) -> Result<()> {
 
     terminal_exit(supports_keyboard_enhancement)?;
     res
-}
-
-fn terminal_enter(supports_keyboard_enhancement: bool) -> Result<()> {
-    let mut stdout = std::io::stdout();
-    terminal::enable_raw_mode().context("enable raw mode")?;
-    let command_queue = stdout.queue(terminal::EnterAlternateScreen)?;
-    if supports_keyboard_enhancement {
-        command_queue.queue(PushKeyboardEnhancementFlags(
-            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
-        ))?;
-    }
-    command_queue.flush().context("setup terminal")?;
-    Ok(())
-}
-
-fn terminal_exit(supports_keyboard_enhancement: bool) -> Result<()> {
-    let mut stdout = std::io::stdout();
-    let command_queue = stdout
-        .queue(terminal::Clear(terminal::ClearType::All))?
-        .queue(terminal::LeaveAlternateScreen)?
-        .queue(cursor::Show)?;
-    if supports_keyboard_enhancement {
-        command_queue.queue(PopKeyboardEnhancementFlags)?;
-    }
-    command_queue.flush().context("reset terminal")?;
-    terminal::disable_raw_mode().context("disable raw mode")?;
-    Ok(())
-}
-
-fn setup_panic_handler(supports_keyboard_enhancement: bool) {
-    let default_panic = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        _ = terminal_exit(supports_keyboard_enhancement);
-        default_panic(info);
-    }));
-}
-
-fn setup_logging() -> Result<()> {
-    use tracing_subscriber::fmt::format::FmtSpan;
-    use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::util::SubscriberInitExt;
-    use tracing_subscriber::EnvFilter;
-    use tracing_subscriber::Layer;
-
-    let xdg_dirs = xdg::BaseDirectories::with_prefix(PROJECT_NAME.clone())
-        .expect("cannot determine XDG paths");
-    let log_path = xdg_dirs
-        .place_data_file(LOG_FILE.clone())
-        .expect("cannot create data file");
-    let log_file = std::fs::File::create(log_path)?;
-
-    std::env::set_var(
-        "RUST_LOG",
-        std::env::var("RUST_LOG")
-            .or_else(|_| std::env::var(LOG_ENV.clone()))
-            .unwrap_or_else(|_| format!("{}=warn", env!("CARGO_CRATE_NAME"))),
-    );
-
-    // let console_subscriber = console_subscriber::ConsoleLayer::builder()
-    //     .with_default_env()
-    //     .spawn();
-    let file_subscriber = tracing_subscriber::fmt::layer()
-        .with_file(true)
-        .with_line_number(true)
-        .with_writer(log_file)
-        .with_target(true)
-        .with_ansi(true)
-        .with_span_events(FmtSpan::CLOSE)
-        .with_filter(EnvFilter::from_default_env());
-    tracing_subscriber::registry()
-        // .with(console_subscriber)
-        .with(file_subscriber)
-        .init();
-
-    Ok(())
 }
 
 async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> Result<()> {
@@ -291,4 +214,112 @@ async fn file_open(path: std::path::PathBuf) -> Result<Buffer> {
         }
         rope = rope.append(block)?;
     }
+}
+
+fn terminal_enter(supports_keyboard_enhancement: bool) -> Result<()> {
+    let mut stdout = std::io::stdout();
+    terminal::enable_raw_mode().context("enable raw mode")?;
+    let command_queue = stdout.queue(terminal::EnterAlternateScreen)?;
+    if supports_keyboard_enhancement {
+        command_queue.queue(PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
+        ))?;
+    }
+    command_queue.flush().context("setup terminal")?;
+    Ok(())
+}
+
+fn terminal_exit(supports_keyboard_enhancement: bool) -> Result<()> {
+    let mut stdout = std::io::stdout();
+    let command_queue = stdout
+        .queue(terminal::Clear(terminal::ClearType::All))?
+        .queue(terminal::LeaveAlternateScreen)?
+        .queue(cursor::Show)?;
+    if supports_keyboard_enhancement {
+        command_queue.queue(PopKeyboardEnhancementFlags)?;
+    }
+    command_queue.flush().context("reset terminal")?;
+    terminal::disable_raw_mode().context("disable raw mode")?;
+    Ok(())
+}
+
+fn setup_panic_handler(supports_keyboard_enhancement: bool) {
+    // let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        _ = terminal_exit(supports_keyboard_enhancement);
+        better_panic::Settings::auto()
+            // .most_recent_first(false)
+            // .lineno_suffix(true)
+            .create_panic_handler()(panic_info);
+        // default_panic(info);
+    }));
+}
+
+// /// This replaces the standard color_eyre panic and error hooks with hooks that
+// /// restore the terminal before printing the panic or error.
+// pub fn setup_panic_handler(supports_keyboard_enhancement: bool) -> color_eyre::Result<()> {
+//     // add any extra configuration you need to the hook builder
+//     let hook_builder = color_eyre::config::HookBuilder::default();
+//     let (panic_hook, eyre_hook) = hook_builder.into_hooks();
+
+//     // convert from a color_eyre PanicHook to a standard panic hook
+//     let panic_hook = panic_hook.into_panic_hook();
+//     std::panic::set_hook(Box::new(move |panic_info| {
+//         // tui::restore().unwrap();
+//         _ = terminal_exit(supports_keyboard_enhancement);
+//         panic_hook(panic_info);
+//     }));
+
+//     // convert from a color_eyre EyreHook to a eyre ErrorHook
+//     let eyre_hook = eyre_hook.into_eyre_hook();
+//     eyre::set_hook(Box::new(move |error| {
+//         // tui::restore().unwrap();
+//         _ = terminal_exit(supports_keyboard_enhancement);
+//         eyre_hook(error)
+//     }))?;
+
+//     Ok(())
+// }
+
+fn setup_logging() -> Result<()> {
+    use tracing_subscriber::fmt::format::FmtSpan;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::Layer;
+
+    let xdg_dirs = xdg::BaseDirectories::with_prefix(PROJECT_NAME.clone())
+        .expect("cannot determine XDG paths");
+    let log_path = xdg_dirs
+        .place_data_file(LOG_FILE.clone())
+        .expect("cannot create data file");
+    let log_file = std::fs::File::create(log_path)?;
+
+    std::env::set_var(
+        "RUST_LOG",
+        std::env::var("RUST_LOG")
+            .or_else(|_| std::env::var(LOG_ENV.clone()))
+            .unwrap_or_else(|_| format!("{}=warn", env!("CARGO_CRATE_NAME"))),
+    );
+
+    // let console_subscriber = console_subscriber::ConsoleLayer::builder()
+    //     .with_default_env()
+    //     .spawn();
+    let file_subscriber = tracing_subscriber::fmt::layer()
+        .with_file(true)
+        .with_line_number(true)
+        .with_writer(log_file)
+        .with_target(true)
+        .with_ansi(true)
+        .with_span_events(FmtSpan::CLOSE)
+        .with_filter(EnvFilter::from_default_env());
+    tracing_subscriber::registry()
+        // .with(console_subscriber)
+        .with(file_subscriber)
+        .init();
+
+    Ok(())
 }
