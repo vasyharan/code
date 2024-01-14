@@ -1,6 +1,6 @@
-use std::ops::{Range, RangeBounds};
+use std::ops::{Deref, Range, RangeBounds};
 
-use super::cursor::{ChunkAndRanges, Chunks};
+use super::iterator::{ChunkAndRanges, Chunks};
 
 use super::{util, Rope};
 
@@ -37,7 +37,7 @@ use super::{util, Rope};
 
 pub(crate) struct RopeSlice<'a> {
     rope: &'a Rope,
-    range: Range<usize>,
+    pub(crate) range: Range<usize>,
 }
 
 // impl<'a> RopeSlice<'a> {
@@ -53,18 +53,26 @@ pub(crate) struct RopeSlice<'a> {
 
 pub(crate) struct RopeLine<'a>(RopeSlice<'a>);
 
+impl<'a> Deref for RopeLine<'a> {
+    type Target = RopeSlice<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl<'a> RopeLine<'a> {
     pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
         RopeLine(RopeSlice { rope, range })
     }
 
     #[allow(dead_code)]
-    pub(crate) fn chunks(&self, range: impl RangeBounds<usize>) -> Chunks<'a> {
+    pub(crate) fn chunks(&self, range: impl RangeBounds<usize>) -> Chunks {
         let range = util::bound_range(&range, self.0.range.clone());
         Chunks::new_trim_last_terminator(self.0.rope, range)
     }
 
-    pub fn chunk_and_ranges(&self, range: impl RangeBounds<usize>) -> ChunkAndRanges<'a> {
+    pub fn chunk_and_ranges(&self, range: impl RangeBounds<usize>) -> ChunkAndRanges {
         let range = util::bound_range(&range, self.0.range.clone());
         ChunkAndRanges::new_trim_last_terminator(self.0.rope, range)
     }

@@ -39,4 +39,10 @@ in {
     # unstable.graphviz
     # unstable.mdbook-graphviz
   ];
+
+  env = {
+    # RUST_LIB_BACKTRACE = 1;
+    # RUST_BACKTRACE = "full";
+    RUST_LOG="info";
+  };
 }

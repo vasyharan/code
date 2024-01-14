@@ -4,10 +4,8 @@ use crate::buffer::Buffer;
 
 #[derive(Debug)]
 pub(crate) enum Error {
-    UnsupportedLanguage,
+    // UnsupportedLanguage,
 }
-
-// type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub(crate) struct Language {

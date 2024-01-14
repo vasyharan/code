@@ -1,76 +1,104 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use slotmap::new_key_type;
 
-use crate::app::BufferId;
+use crate::app::{self};
+use crate::buffer::{self};
+use crate::rope::{self, Rope};
+
+#[derive(Debug)]
+pub(crate) enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
 
 #[derive(Debug)]
 pub(crate) enum Command {
-    SetMode(EditorMode),
-    CursorUp,
-    CursorDown,
-    CursorRight,
-    CursorLeft,
+    SetMode(Mode),
+    MoveCursor(Direction),
+    Insert(char),
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct EditorPosition {
-    pub(crate) row: usize,
-    pub(crate) col: usize,
+pub(crate) struct Position(pub(crate) usize);
+
+impl From<usize> for Position {
+    fn from(value: usize) -> Self {
+        Position(value)
+    }
 }
 
-#[derive(Debug, Default)]
-pub(crate) enum EditorMode {
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) enum Mode {
     #[default]
     Normal,
     Insert,
 }
 
-#[derive(Debug)]
-pub(crate) struct EditorContext {
-    pub(crate) buffer_id: BufferId,
-    pub(crate) mode: EditorMode,
-    pub(crate) cursor_pos: EditorPosition,
+new_key_type! {
+    pub(crate) struct Id;
 }
 
-impl EditorContext {
-    pub(crate) fn new_buffer(buffer_id: BufferId) -> Self {
-        Self { buffer_id, mode: Default::default(), cursor_pos: Default::default() }
+#[derive(Debug)]
+pub(crate) struct Editor {
+    // pub(crate) id: Id,
+    pub(crate) buffer_id: buffer::Id,
+    pub(crate) mode: Mode,
+    pub(crate) cursor: rope::Cursor,
+}
+
+impl Editor {
+    pub(crate) fn new_contents(_id: Id, buffer_id: buffer::Id, contents: Rope) -> Self {
+        let cursor = contents.cursor();
+        Self { buffer_id, mode: Default::default(), cursor }
     }
 
     pub(crate) fn process_key(&self, key: KeyEvent) -> Option<Command> {
         match self.mode {
-            EditorMode::Normal => match key.code {
-                KeyCode::Up => Some(Command::CursorUp),
-                KeyCode::Down => Some(Command::CursorDown),
-                KeyCode::Left => Some(Command::CursorLeft),
-                KeyCode::Right => Some(Command::CursorRight),
+            Mode::Normal => match key.code {
+                KeyCode::Up => Some(Command::MoveCursor(Direction::Up)),
+                KeyCode::Down => Some(Command::MoveCursor(Direction::Down)),
+                KeyCode::Left => Some(Command::MoveCursor(Direction::Left)),
+                KeyCode::Right => Some(Command::MoveCursor(Direction::Right)),
+                KeyCode::Char('i') => Some(Command::SetMode(Mode::Insert)),
                 _ => None,
             },
-            _ => todo!(),
+            Mode::Insert => match key.code {
+                KeyCode::Esc => Some(Command::SetMode(Mode::Normal)),
+                KeyCode::Up => Some(Command::MoveCursor(Direction::Up)),
+                KeyCode::Down => Some(Command::MoveCursor(Direction::Down)),
+                KeyCode::Left => Some(Command::MoveCursor(Direction::Left)),
+                KeyCode::Right => Some(Command::MoveCursor(Direction::Right)),
+                KeyCode::Char(c) => Some(Command::Insert(c)),
+                _ => None,
+            },
         }
     }
 
-    pub(crate) fn command(&mut self, command: Command) -> () {
+    pub(crate) fn command(&mut self, command: &Command) -> Option<app::Command> {
         match command {
-            Command::SetMode(mode) => {
-                self.mode = mode;
-            }
-            Command::CursorUp => {
-                if self.cursor_pos.row > 0 {
-                    self.cursor_pos.row -= 1;
+            Command::SetMode(mode) => self.mode = *mode,
+            Command::MoveCursor(direction) => match direction {
+                Direction::Up => todo!(),
+                Direction::Down => todo!(),
+                Direction::Left => {
+                    self.cursor.prev();
+                    if let Some(b'\n') = self.cursor.peek_byte() {
+                        self.cursor.next();
+                    }
                 }
-            }
-            Command::CursorDown => {
-                self.cursor_pos.row += 1;
-            }
-
-            Command::CursorRight => {
-                self.cursor_pos.col += 1;
-            }
-            Command::CursorLeft => {
-                if self.cursor_pos.col > 0 {
-                    self.cursor_pos.col -= 1;
+                Direction::Right => {
+                    self.cursor.next();
+                    if let Some(b'\n') = self.cursor.peek_byte() {
+                        self.cursor.prev();
+                    }
                 }
+            },
+            Command::Insert(c) => {
+                return Some(app::Command::BufferInsert(self.buffer_id, *c));
             }
-        }
+        };
+        None
     }
 }

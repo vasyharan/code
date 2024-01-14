@@ -5,15 +5,13 @@ use futures::Stream;
 use tokio::sync::mpsc;
 use tree_sitter as ts;
 
-use crate::{
-    app::BufferId,
-    rope::{self, Chunks, Rope},
-};
+use crate::buffer;
+use crate::rope::{self, Rope};
 
 pub(crate) mod highlighter;
 pub(crate) mod language;
 
-use language::Language;
+pub(crate) use language::Language;
 
 #[derive(Debug)]
 struct RopeTextProvider<'a>(&'a Rope);
@@ -31,7 +29,7 @@ impl<'a> RopeTextProvider<'a> {
 }
 
 impl<'a> ts::TextProvider<'a> for RopeTextProvider<'a> {
-    type I = Chunks<'a>;
+    type I = rope::Chunks<'a>;
 
     fn text(&mut self, node: ts::Node) -> Self::I {
         self.0.chunks(node.byte_range())
@@ -41,7 +39,7 @@ impl<'a> ts::TextProvider<'a> for RopeTextProvider<'a> {
 #[derive(Debug)]
 pub(crate) enum Command {
     Parse {
-        buffer_id: BufferId,
+        buffer_id: buffer::Id,
         contents: Rope,
         language: Language,
     },
@@ -49,8 +47,8 @@ pub(crate) enum Command {
 
 #[derive(Debug)]
 pub(crate) enum SyntaxEvent {
-    Parsed(BufferId, ts::Tree),
-    Hightlight(BufferId, highlighter::Highlights),
+    Parsed(buffer::Id, ts::Tree),
+    Hightlight(buffer::Id, highlighter::Highlights),
 }
 
 #[derive(Debug)]
@@ -98,15 +96,15 @@ impl Worker {
 pub(crate) struct Client {
     cmd_tx: mpsc::Sender<Command>,
     event_rx: mpsc::Receiver<SyntaxEvent>,
-    worker: Worker,
+    // worker: Worker,
 }
 
 impl Client {
     pub(crate) fn spawn() -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::channel(1);
-        let worker = Worker::spawn(cmd_rx, event_tx);
-        Client { cmd_tx, event_rx, worker }
+        let _worker = Worker::spawn(cmd_rx, event_tx);
+        Client { cmd_tx, event_rx }
     }
 
     pub(crate) async fn send(

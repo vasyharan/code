@@ -9,20 +9,19 @@ use crossterm::event::{
 };
 use crossterm::terminal;
 use crossterm::QueueableCommand;
-use futures::TryFutureExt;
 use futures::{future::FutureExt, StreamExt};
 use lazy_static::lazy_static;
 use ratatui::backend::CrosstermBackend;
 use ratatui::prelude as tui;
 use ratatui::Terminal;
-use slotmap::{new_key_type, SlotMap};
+use slotmap::SlotMap;
 use tokio::fs::File;
 use tokio::sync::mpsc;
 
-use crate::buffer::Buffer;
-use crate::editor::{self, EditorContext};
+use crate::buffer::{self, Buffer};
+use crate::editor::{self, Editor};
 use crate::rope::{self, Rope};
-use crate::syntax::{self, language::Language};
+use crate::syntax;
 use crate::theme::Theme;
 
 lazy_static! {
@@ -44,32 +43,46 @@ pub(crate) enum Command {
     FileOpen(std::path::PathBuf),
 
     EditorCommand(editor::Command),
+    BufferInsert(buffer::Id, char),
 }
 
-new_key_type! {
-    pub(crate) struct BufferId;
-}
+type BufferMap = SlotMap<buffer::Id, Buffer>;
 
 #[derive(Debug)]
-pub(crate) struct AppContext {
-    pub(crate) theme: Theme,
-    pub(crate) editor: EditorContext,
-
-    buffers: SlotMap<BufferId, Buffer>,
+pub(crate) struct App {
+    theme: Theme,
+    buffers: BufferMap,
+    editor_id: (buffer::Id, editor::Id),
 }
 
-impl AppContext {
-    pub(crate) fn buffer_create(&mut self, buffer: Buffer) -> BufferId {
-        self.buffers.insert(buffer)
+impl App {
+    fn new() -> Self {
+        let mut buffers = BufferMap::with_key();
+        let buffer_id: buffer::Id = buffers.insert_with_key(Buffer::empty);
+        let buffer = &mut buffers[buffer_id];
+        let contents = buffer.contents.clone();
+        let buffer_view_id = buffer
+            .editors
+            .insert_with_key(|id| Editor::new_contents(id, buffer_id, contents));
+        let editor_id = (buffer_id, buffer_view_id);
+
+        Self { theme: Default::default(), buffers, editor_id }
     }
-}
 
-impl Default for AppContext {
-    fn default() -> Self {
-        let mut buffers = SlotMap::with_key();
-        let buffer_id: BufferId = buffers.insert(Buffer::default());
-
-        Self { theme: Default::default(), buffers, editor: EditorContext::new_buffer(buffer_id) }
+    async fn file_open(&mut self, p: std::path::PathBuf) -> Result<&Buffer> {
+        let contents = file_open(&p).await?;
+        let previous_editor_id = self.editor_id;
+        let buffer_id = self
+            .buffers
+            .insert_with_key(|buffer_id| Buffer::new(buffer_id, Some(p), contents));
+        self.buffers.remove(previous_editor_id.0);
+        let buffer = &mut self.buffers[buffer_id];
+        let contents = buffer.contents.clone();
+        let editor_id = buffer
+            .editors
+            .insert_with_key(|id| Editor::new_contents(id, buffer_id, contents));
+        self.editor_id = (buffer_id, editor_id);
+        Ok(buffer)
     }
 }
 
@@ -90,7 +103,7 @@ pub fn main(args: Args) -> Result<()> {
             }
         }
 
-        return main_loop.await?;
+        main_loop.await?
     });
 
     terminal_exit(supports_keyboard_enhancement)?;
@@ -101,65 +114,67 @@ async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> Result<()> {
     let mut term = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
     let mut input = EventStream::new();
     let mut syntax = syntax::Client::spawn();
-    let mut context = AppContext::default();
+    let mut app = App::new();
 
     'main: loop {
         term.draw(|frame| {
             let area = frame.size();
-            let style = tui::Style::default().bg(context.theme.bg().0);
+            let style = tui::Style::default().bg(app.theme.bg().0);
             frame.buffer_mut().set_style(area, style);
 
-            // let buffer = context.buffers[]
-            let buffer = &context.buffers[context.editor.buffer_id];
-            let root = crate::widgets::EditorPane {
-                buffer,
-                theme: &context.theme,
-                context: &context.editor,
-            };
-            let cursor_pos = root.screen_cursor_position((area.width, area.height));
-            frame.render_widget(root, area);
+            let (buffer_id, editor_id) = app.editor_id;
+            let buffer: &Buffer = &app.buffers[buffer_id];
+            let editor: &Editor = &buffer.editors[editor_id];
+            let pane = crate::widgets::EditorPane::new(&app.theme, buffer, editor);
+            let cursor_pos = pane
+                .screen_cursor_position((area.width, area.height))
+                .unwrap();
+            frame.render_widget(pane, area);
             frame.set_cursor(cursor_pos.0, cursor_pos.1);
         })?;
 
-        let maybe_command = tokio::select! {
+        let mut maybe_command = tokio::select! {
             maybe_input_event = input.next().fuse() => {
                 match maybe_input_event {
-                    Some(event) => process_event(&context, event?),
+                    Some(event) => process_event(&app, event?),
                     None => break 'main,
                 }
             }
             maybe_syntax_event = syntax.next().fuse() => {
                 match maybe_syntax_event {
-                    Some(event) => process_syntax(&mut context, event),
+                    Some(event) => process_syntax(&mut app, event),
                     None => panic!("syntax thread crashed?")
                 }
              }
             maybe_command = app_rx.recv() => { maybe_command }
         };
 
-        if let Some(command) = maybe_command {
+        while let Some(command) = maybe_command.take() {
             use Command::*;
 
             match command {
                 Quit => break 'main,
                 FileOpen(p) => {
-                    let buffer = file_open(p).await?;
-                    let contents = buffer.contents.clone();
-                    let buffer_id = context.buffer_create(buffer);
-                    let buffer = &context.buffers[buffer_id];
-                    match Language::try_from(buffer) {
+                    let buffer = app.file_open(p).await?;
+                    match syntax::Language::try_from(buffer) {
                         Ok(language) => {
                             syntax
-                                .send(syntax::Command::Parse { buffer_id, contents, language })
+                                .send(syntax::Command::Parse {
+                                    buffer_id: buffer.id,
+                                    contents: buffer.contents.clone(),
+                                    language,
+                                })
                                 .await?;
-                            ()
                         }
-                        _ => (),
+                        _ => todo!(),
                     }
-
-                    context.editor = EditorContext::new_buffer(buffer_id);
                 }
-                EditorCommand(command) => context.editor.command(command),
+                BufferInsert(..) => {}
+                EditorCommand(cmd) => {
+                    let buffer = &mut app.buffers[app.editor_id.0];
+                    let editor = &mut buffer.editors[app.editor_id.1];
+                    editor.command(&cmd);
+                }
             }
         }
     }
@@ -167,25 +182,25 @@ async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> Result<()> {
     Ok(())
 }
 
-#[tracing::instrument]
-fn process_syntax(context: &mut AppContext, event: syntax::SyntaxEvent) -> Option<Command> {
+#[tracing::instrument(skip(ctx, event))]
+fn process_syntax(ctx: &mut App, event: syntax::SyntaxEvent) -> Option<Command> {
     match event {
         syntax::SyntaxEvent::Parsed(..) => (),
         syntax::SyntaxEvent::Hightlight(buffer_id, hls) => {
-            context.buffers[buffer_id].highlights = hls;
+            ctx.buffers[buffer_id].highlights = hls;
         }
     }
     None
 }
 
-#[tracing::instrument]
-fn process_event(ctx: &AppContext, event: Event) -> Option<Command> {
+#[tracing::instrument(skip(ctx, event))]
+fn process_event(ctx: &App, event: Event) -> Option<Command> {
     match event {
         Event::FocusGained => todo!(),
         Event::FocusLost => todo!(),
         Event::Paste(_) => todo!(),
         Event::Mouse(_) => todo!(),
-        Event::Resize(_, _) => None,
+        Event::Resize(_, _) => todo!(),
         Event::Key(key) => {
             let global_command = match key.code {
                 KeyCode::Char(c) => {
@@ -197,20 +212,24 @@ fn process_event(ctx: &AppContext, event: Event) -> Option<Command> {
                 }
                 _ => None,
             };
-            global_command.or_else(|| ctx.editor.process_key(key).map(Command::EditorCommand))
+            global_command.or_else(|| {
+                let buffer = &ctx.buffers[ctx.editor_id.0];
+                let editor = &buffer.editors[ctx.editor_id.1];
+                editor.process_key(key).map(Command::EditorCommand)
+            })
         }
     }
 }
 
 #[tracing::instrument]
-async fn file_open(path: std::path::PathBuf) -> Result<Buffer> {
+async fn file_open(path: &std::path::PathBuf) -> Result<Rope> {
     let mut blocks = rope::BlockBuffer::new();
     let mut file = File::open(&path).await?;
     let mut rope = Rope::empty();
     loop {
         let (block, read) = blocks.read(&mut file).await?;
         if read == 0 {
-            break Ok(Buffer::new(path, rope));
+            break Ok(rope);
         }
         rope = rope.append(block)?;
     }
@@ -250,10 +269,7 @@ fn setup_panic_handler(supports_keyboard_enhancement: bool) {
     // let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         _ = terminal_exit(supports_keyboard_enhancement);
-        better_panic::Settings::auto()
-            // .most_recent_first(false)
-            // .lineno_suffix(true)
-            .create_panic_handler()(panic_info);
+        better_panic::Settings::auto().create_panic_handler()(panic_info);
         // default_panic(info);
     }));
 }

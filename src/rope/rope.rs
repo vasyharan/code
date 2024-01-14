@@ -5,9 +5,10 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use super::block::BlockRange;
-use super::cursor::{ChunkAndRanges, Chunks, Lines};
+use super::cursor::Cursor;
 use super::error::{Error, Result};
-use super::tree::{Node, NodeColour};
+use super::iterator::{ChunkAndRanges, Chunks, Lines};
+use super::tree::{self, Node, NodeColour};
 use super::util;
 
 use Node::*;
@@ -22,6 +23,10 @@ impl Rope {
         Self(root)
     }
 
+    pub(crate) fn cursor(&self) -> Cursor {
+        Cursor::new(self.clone())
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
@@ -32,6 +37,14 @@ impl Rope {
 
     pub fn append(&self, text: BlockRange) -> Result<Self> {
         self.insert(self.len(), text)
+    }
+
+    pub fn line_at_offset(&self, offset: usize) -> Result<(usize, usize)> {
+        if offset > self.len() {
+            return Err(Error::IndexOutOfBounds(offset, self.len()));
+        }
+        let (line, offset) = line_at_offset(&self.0, offset);
+        Ok((line, offset))
     }
 
     pub fn insert(&self, offset: usize, text: BlockRange) -> Result<Self> {
@@ -419,6 +432,19 @@ fn split_recurse(
     }
 }
 
+fn line_at_offset(node: &Node, offset: usize) -> (usize, usize) {
+    let mut parents = vec![];
+    let (_, metrics) = tree::leaf_at_byte_offset(&mut parents, node, offset);
+    parents.clear();
+    let line = metrics.num_lines;
+    let (node, metrics) = tree::leaf_at_line_offset(&mut parents, node, line);
+    if let Some((_, node_offset)) = node {
+        (line, metrics.len + node_offset)
+    } else {
+        (0, 0)
+    }
+}
+
 fn black_height(node: &Node) -> usize {
     match &node {
         Empty | Leaf { .. } => 0,
@@ -641,19 +667,50 @@ mod tests {
         assert!(rope.is_balanced());
 
         let mut buffer = BlockBuffer::new();
-        for (_i, (at, p)) in parts.iter().enumerate() {
+        for (i, (at, p)) in parts.iter().enumerate() {
             let (block, w) = buffer.append(p.as_bytes()).unwrap();
             assert_eq!(w, p.len());
             rope = rope.insert(*at, block).unwrap();
 
-            // let mut file = std::fs::File::create(format!("target/tests/insert{:02}.dot", i))
-            //     .expect("create file");
-            // rope.write_dot(&mut file).expect("write dot file");
+            let mut file = std::fs::File::create(format!("target/tests/insert{:02}.dot", i))
+                .expect("create file");
+            rope.write_dot(&mut file).expect("write dot file");
 
             assert!(rope.is_balanced());
         }
         assert!(rope.is_balanced());
         assert_eq!(rope.to_bstring(), contents);
+
+        let line_offsets = vec![0, 34, 78, 109, 134, 187];
+        for (line_num, (line, expected)) in rope
+            .lines(..)
+            // .zip(std::iter::once(&0).chain(line_offsets.iter()))
+            .zip(line_offsets.iter())
+            .enumerate()
+        {
+            let offset = line.range.start;
+            assert_eq!(offset, *expected, "line num={}", line_num)
+        }
+
+        let mut line_number = 0;
+        let mut line_start = 0;
+        let mut line_offsets = line_offsets.iter();
+        let mut maybe_next_offset = line_offsets.next();
+        for idx in 0..rope.len() {
+            if let Some(next_offset) = maybe_next_offset {
+                match next_offset.cmp(&idx) {
+                    Ordering::Less => unreachable!(),
+                    Ordering::Equal => {
+                        maybe_next_offset = line_offsets.next();
+                        line_number += 1;
+                        line_start = *next_offset;
+                    }
+                    Ordering::Greater => { /*ignore */ }
+                }
+            }
+            let res = rope.line_at_offset(idx).expect("line at offset");
+            assert_eq!(res, (line_number - 1, line_start), "offset={}", idx);
+        }
 
         #[rustfmt::skip]
         let parts = vec![
