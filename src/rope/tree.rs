@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::rope::block::BlockRange;
+use crate::rope::block::Slab;
 
 use Node::{Branch, Empty, Leaf};
 
@@ -86,9 +86,7 @@ pub(super) enum Node {
         metrics: NodeMetrics,
     },
     Leaf {
-        // val: String,
-        // len: usize,
-        block_ref: BlockRange,
+        slab: Slab,
         metrics: NodeMetrics,
     },
     Empty,
@@ -106,10 +104,10 @@ impl Node {
         Branch { colour, left, right, metrics }
     }
 
-    pub(super) fn new_leaf(val: BlockRange) -> Self {
+    pub(super) fn new_leaf(val: Slab) -> Self {
         let num_lines = bytecount::count(val.as_bytes(), b'\n');
         let metrics = NodeMetrics { len: val.len(), num_lines };
-        Leaf { block_ref: val, metrics }
+        Leaf { slab: val, metrics }
     }
 
     pub(super) fn metrics(&self) -> &NodeMetrics {
@@ -204,7 +202,7 @@ impl Node {
     pub(super) fn to_bstring(&self) -> BString {
         match self {
             Empty => b"".into(),
-            Leaf { block_ref, .. } => block_ref.as_bytes().into(),
+            Leaf { slab: block_ref, .. } => block_ref.as_bytes().into(),
             Branch { left, right, .. } => {
                 let mut bstr = left.to_bstring();
                 bstr.push_str(right.to_bstring());
@@ -230,7 +228,7 @@ pub(super) fn leaf_at_line_offset<'a>(
         }
         match node {
             Node::Empty { .. } => unreachable!(),
-            Node::Leaf { block_ref, metrics, .. } => {
+            Node::Leaf { slab: block_ref, metrics, .. } => {
                 if line <= metrics.num_lines {
                     let bytes = block_ref.as_bytes();
                     let offset = if line == 1 {
@@ -351,7 +349,7 @@ pub(super) fn next_line<'a>(
     let mut cumlm = NodeMetrics::EMPTY;
     let mut search_leaf = Some((from_leaf, from_leaf_offset));
     while let Some((leaf, offset)) = search_leaf {
-        if let Node::Leaf { block_ref, metrics, .. } = leaf {
+        if let Node::Leaf { slab: block_ref, metrics, .. } = leaf {
             if metrics.num_lines > 0 {
                 let bytes = &block_ref.as_bytes()[offset..];
                 if let Some(o) = memchr::memchr(b'\n', bytes) {

@@ -1,20 +1,19 @@
-use std::{
-    cmp::min,
-    ops::{Range, RangeBounds},
-    sync::Arc,
-};
+use std::cmp::min;
+use std::ops::{Range, RangeBounds};
+use std::sync::Arc;
 
-use tokio::{fs::File, io::AsyncReadExt};
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
 
 const BLOCK_CAPACITY: usize = 4096;
 
 #[derive(Debug)]
-struct Bytes([u8; BLOCK_CAPACITY]); // TODO: tune size of byte array
+struct SlabBlock([u8; BLOCK_CAPACITY]); // TODO: tune size of byte array
 
 #[derive(Debug)]
-pub struct BlockRange(Arc<Bytes>, Range<usize>);
+pub struct Slab(Arc<SlabBlock>, Range<usize>);
 
-impl BlockRange {
+impl Slab {
     pub fn is_empty(&self) -> bool {
         self.1.is_empty()
     }
@@ -48,23 +47,23 @@ impl BlockRange {
     }
 }
 
-pub struct BlockBuffer {
-    block: Arc<Bytes>,
+pub struct SlabAllocator {
+    block: Arc<SlabBlock>,
     head: usize,
 }
 
-impl Default for BlockBuffer {
+impl Default for SlabAllocator {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl BlockBuffer {
+impl SlabAllocator {
     pub fn new() -> Self {
-        Self { block: Arc::new(Bytes([0; BLOCK_CAPACITY])), head: 0 }
+        Self { block: Arc::new(SlabBlock([0; BLOCK_CAPACITY])), head: 0 }
     }
 
-    pub fn append(&mut self, val: &[u8]) -> std::io::Result<(BlockRange, usize)> {
+    pub fn append(&mut self, val: &[u8]) -> std::io::Result<(Slab, usize)> {
         use std::io::Write;
         let (block, head, rem) = self.block_remaining();
         let len = min(val.len(), rem);
@@ -75,10 +74,10 @@ impl BlockBuffer {
         let written = bytes.write(&val[..len])?;
         self.head += written;
         let range = head..(head + written);
-        Ok((BlockRange(block.clone(), range), written))
+        Ok((Slab(block.clone(), range), written))
     }
 
-    pub async fn read(&mut self, file: &mut File) -> std::io::Result<(BlockRange, usize)> {
+    pub async fn read(&mut self, file: &mut File) -> std::io::Result<(Slab, usize)> {
         let (block, head, rem) = self.block_remaining();
         let bytes: &mut [u8] = unsafe {
             let bytes = (&block.as_ref().0 as *const u8) as *mut u8;
@@ -87,13 +86,13 @@ impl BlockBuffer {
         let written = file.read(bytes).await?;
         self.head += written;
         let range = head..(head + written);
-        Ok((BlockRange(block.clone(), range), written))
+        Ok((Slab(block.clone(), range), written))
     }
 
-    fn block_remaining(&mut self) -> (Arc<Bytes>, usize, usize) {
+    fn block_remaining(&mut self) -> (Arc<SlabBlock>, usize, usize) {
         if self.head >= BLOCK_CAPACITY {
             // new block please
-            self.block = Arc::new(Bytes([0; BLOCK_CAPACITY]));
+            self.block = Arc::new(SlabBlock([0; BLOCK_CAPACITY]));
             self.head = 0;
         }
         (self.block.clone(), self.head, BLOCK_CAPACITY - self.head)

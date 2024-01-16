@@ -13,10 +13,7 @@ pub(crate) struct Cursor {
 
 impl Cursor {
     pub(crate) fn new(rope: Rope) -> Self {
-        let index = 0;
-        let mut parents = vec![];
-        let pos = None;
-        Self { rope, index, parents, pos }
+        Self { rope, index: 0, parents: vec![], pos: None }
     }
 
     pub(crate) fn byte_offset(&self) -> usize {
@@ -62,17 +59,15 @@ impl Cursor {
             Some((ref leaf, offset)) => match leaf.as_ref() {
                 Node::Branch { .. } => unreachable!(),
                 Node::Empty => &[],
-                Node::Leaf { block_ref, .. } => &block_ref.as_bytes()[offset..],
+                Node::Leaf { slab: block_ref, .. } => &block_ref.as_bytes()[offset..],
             },
         }
     }
 
     fn forward_by(&mut self, len: usize) -> usize {
-        if self.index == 0 {
-            if let None = self.pos {
-                assert!(self.parents.is_empty());
-                self.pos = Some(leftmost_leaf(&mut self.parents, &self.rope.0));
-            }
+        if self.index == 0 && self.pos.is_none() {
+            assert!(self.parents.is_empty());
+            self.pos = Some(leftmost_leaf(&mut self.parents, &self.rope.0));
         }
 
         let mut result = 0;
@@ -82,7 +77,7 @@ impl Cursor {
                 Some((ref leaf, ref mut offset)) => match leaf.as_ref() {
                     Node::Branch { .. } => unreachable!(),
                     Node::Empty => return 0,
-                    Node::Leaf { block_ref, .. } => {
+                    Node::Leaf { slab: block_ref, .. } => {
                         let bs = &block_ref.as_bytes()[*offset..];
                         if bs.len() > len {
                             result += len;
@@ -107,11 +102,9 @@ impl Cursor {
     }
 
     fn backward_by(&mut self, len: usize) -> usize {
-        if self.index == self.rope.len() {
-            if let None = self.pos {
-                assert!(self.parents.is_empty());
-                self.pos = Some(rightmost_leaf(&mut self.parents, &self.rope.0));
-            }
+        if self.index == self.rope.len() && self.pos.is_none() {
+            assert!(self.parents.is_empty());
+            self.pos = Some(rightmost_leaf(&mut self.parents, &self.rope.0));
         }
 
         let mut result = 0;
@@ -121,7 +114,7 @@ impl Cursor {
                 Some((ref leaf, ref mut offset)) => match leaf.as_ref() {
                     Node::Branch { .. } => unreachable!(),
                     Node::Empty => return 0,
-                    Node::Leaf { block_ref, .. } => {
+                    Node::Leaf { slab: block_ref, .. } => {
                         let bs = &block_ref.as_bytes()[..*offset];
                         if bs.len() >= len {
                             result += len;
@@ -145,34 +138,6 @@ impl Cursor {
 
         result
     }
-}
-
-fn leaf_at_byte_offset(
-    parents: &mut Vec<Arc<Node>>,
-    node: &Arc<Node>,
-    offset: usize,
-) -> Option<(Arc<Node>, usize)> {
-    let mut node = node;
-    let mut offset = offset;
-    while offset < node.len() {
-        match node.as_ref() {
-            Node::Empty { .. } => unreachable!(),
-            Node::Leaf { .. } => {
-                return Some((node.clone(), offset));
-            }
-            Node::Branch { left, right, .. } => {
-                parents.push(node.clone());
-                if offset < left.len() {
-                    node = left;
-                } else {
-                    offset -= left.len();
-                    node = right;
-                }
-            }
-        }
-    }
-
-    None
 }
 
 fn leftmost_leaf(parents: &mut Vec<Arc<Node>>, from_node: &Arc<Node>) -> (Arc<Node>, usize) {
@@ -257,7 +222,7 @@ fn prev_leaf(parents: &mut Vec<Arc<Node>>, from_leaf: &Arc<Node>) -> Option<(Arc
 
 #[cfg(test)]
 mod tests {
-    use crate::rope::{BlockBuffer, Rope};
+    use crate::rope::{Rope, SlabAllocator};
 
     #[test]
     fn cursor_next_prev() {
@@ -298,7 +263,7 @@ mod tests {
 
     fn build_rope(parts: Vec<&str>) -> Rope {
         let mut rope = Rope::empty();
-        let mut buffer = BlockBuffer::new();
+        let mut buffer = SlabAllocator::new();
         for (_i, p) in parts.iter().enumerate() {
             let (block, w) = buffer.append(p.as_bytes()).unwrap();
             assert_eq!(w, p.len());

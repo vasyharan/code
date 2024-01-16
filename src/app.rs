@@ -223,7 +223,7 @@ fn process_event(ctx: &App, event: Event) -> Option<Command> {
 
 #[tracing::instrument]
 async fn file_open(path: &std::path::PathBuf) -> Result<Rope> {
-    let mut blocks = rope::BlockBuffer::new();
+    let mut blocks = rope::SlabAllocator::new();
     let mut file = File::open(&path).await?;
     let mut rope = Rope::empty();
     loop {

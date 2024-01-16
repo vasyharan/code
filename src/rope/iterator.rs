@@ -34,7 +34,7 @@ impl<'a> Iterator for ChunkAndRanges<'a> {
         }
 
         let (leaf, leaf_start) = self.curr_pos.unwrap();
-        if let Node::Leaf { block_ref, metrics, .. } = leaf {
+        if let Node::Leaf { slab: block_ref, metrics, .. } = leaf {
             let bytes = &block_ref.as_bytes()[leaf_start..];
             let chunk = if bytes.len() < self.range.len() {
                 Some(bytes)
@@ -158,7 +158,7 @@ mod tests {
     use bstr::{BStr, ByteSlice};
 
     use crate::rope::macros::*;
-    use crate::rope::{BlockBuffer, Rope};
+    use crate::rope::{Rope, SlabAllocator};
 
     #[test]
     fn lines_empty_rope() {
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn chunks_basic() {
-        let mut buf = BlockBuffer::new();
+        let mut buf = SlabAllocator::new();
         let chunks: Vec<&[u8]> = vec![
             b"This",
             b" is ",
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn lines_basic() {
-        let mut buf = BlockBuffer::new();
+        let mut buf = SlabAllocator::new();
         let chunks: Vec<&[u8]> = vec![
             b"This",
             b" is ",

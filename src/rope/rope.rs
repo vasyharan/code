@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use super::block::BlockRange;
+use super::block::Slab;
 use super::cursor::Cursor;
 use super::error::{Error, Result};
 use super::iterator::{ChunkAndRanges, Chunks, Lines};
@@ -35,7 +35,7 @@ impl Rope {
         self.0.num_lines() + 1
     }
 
-    pub fn append(&self, text: BlockRange) -> Result<Self> {
+    pub fn append(&self, text: Slab) -> Result<Self> {
         self.insert(self.len(), text)
     }
 
@@ -47,7 +47,7 @@ impl Rope {
         Ok((line, offset))
     }
 
-    pub fn insert(&self, offset: usize, text: BlockRange) -> Result<Self> {
+    pub fn insert(&self, offset: usize, text: Slab) -> Result<Self> {
         if offset > self.len() {
             return Err(Error::IndexOutOfBounds(offset, self.len()));
         }
@@ -197,10 +197,10 @@ fn make_black(node: Arc<Node>) -> Arc<Node> {
     }
 }
 
-fn insert(node: &Arc<Node>, offset: usize, text: BlockRange) -> Node {
+fn insert(node: &Arc<Node>, offset: usize, text: Slab) -> Node {
     match node.as_ref() {
         Empty => Node::new_leaf(text),
-        Leaf { block_ref, .. } => {
+        Leaf { slab: block_ref, .. } => {
             if node.len() == 0 {
                 Node::new_leaf(text)
             } else if offset == 0 {
@@ -400,7 +400,7 @@ fn split_recurse(
 ) -> (Option<NodeWithHeight>, Option<NodeWithHeight>, usize) {
     match node {
         Empty => (None, None, 0),
-        Leaf { block_ref, .. } => {
+        Leaf { slab: block_ref, .. } => {
             // TODO: stop making copies if possible
             let split_left = if at == 0 {
                 None
@@ -571,7 +571,7 @@ mod tests {
     use rand::{Rng, SeedableRng};
 
     use super::*;
-    use crate::rope::block::BlockBuffer;
+    use crate::rope::block::SlabAllocator;
     use crate::rope::macros::*;
 
     enum Operation {
@@ -666,7 +666,7 @@ mod tests {
         let mut rope = Rope::empty();
         assert!(rope.is_balanced());
 
-        let mut buffer = BlockBuffer::new();
+        let mut buffer = SlabAllocator::new();
         for (i, (at, p)) in parts.iter().enumerate() {
             let (block, w) = buffer.append(p.as_bytes()).unwrap();
             assert_eq!(w, p.len());
@@ -829,7 +829,7 @@ mod tests {
 
     #[test]
     fn regression_1() {
-        let mut buf = BlockBuffer::new();
+        let mut buf = SlabAllocator::new();
 
         let tree = Rope(branch_b!(
             branch_b!(
@@ -856,7 +856,7 @@ mod tests {
         std::fs::create_dir_all("target/assert/").expect("create directory");
 
         let tree = Rope::empty();
-        let mut buffer = BlockBuffer::new();
+        let mut buffer = SlabAllocator::new();
         let mut rng = rand::rngs::SmallRng::from_entropy();
 
         (0..1_000).fold(tree, |rope, i| {
