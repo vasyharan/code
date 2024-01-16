@@ -5,7 +5,7 @@ use crate::app::{self};
 use crate::buffer::{self};
 use crate::rope::{self, Rope};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Direction {
     Up,
     Down,
@@ -13,10 +13,17 @@ pub(crate) enum Direction {
     Right,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub(crate) enum CursorJump {
+    ForwardEndWord,
+    ForwardNextWord,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum Command {
-    SetMode(Mode),
-    MoveCursor(Direction),
+    ModeSet(Mode),
+    CursorMove(Direction),
+    CursorJump(CursorJump),
     Insert(char),
 }
 
@@ -57,19 +64,21 @@ impl Editor {
     pub(crate) fn process_key(&self, key: KeyEvent) -> Option<Command> {
         match self.mode {
             Mode::Normal => match key.code {
-                KeyCode::Up => Some(Command::MoveCursor(Direction::Up)),
-                KeyCode::Down => Some(Command::MoveCursor(Direction::Down)),
-                KeyCode::Left => Some(Command::MoveCursor(Direction::Left)),
-                KeyCode::Right => Some(Command::MoveCursor(Direction::Right)),
-                KeyCode::Char('i') => Some(Command::SetMode(Mode::Insert)),
+                KeyCode::Up => Some(Command::CursorMove(Direction::Up)),
+                KeyCode::Down => Some(Command::CursorMove(Direction::Down)),
+                KeyCode::Left => Some(Command::CursorMove(Direction::Left)),
+                KeyCode::Right => Some(Command::CursorMove(Direction::Right)),
+                KeyCode::Char('w') => Some(Command::CursorJump(CursorJump::ForwardNextWord)),
+                KeyCode::Char('e') => Some(Command::CursorJump(CursorJump::ForwardEndWord)),
+                KeyCode::Char('i') => Some(Command::ModeSet(Mode::Insert)),
                 _ => None,
             },
             Mode::Insert => match key.code {
-                KeyCode::Esc => Some(Command::SetMode(Mode::Normal)),
-                KeyCode::Up => Some(Command::MoveCursor(Direction::Up)),
-                KeyCode::Down => Some(Command::MoveCursor(Direction::Down)),
-                KeyCode::Left => Some(Command::MoveCursor(Direction::Left)),
-                KeyCode::Right => Some(Command::MoveCursor(Direction::Right)),
+                KeyCode::Esc => Some(Command::ModeSet(Mode::Normal)),
+                KeyCode::Up => Some(Command::CursorMove(Direction::Up)),
+                KeyCode::Down => Some(Command::CursorMove(Direction::Down)),
+                KeyCode::Left => Some(Command::CursorMove(Direction::Left)),
+                KeyCode::Right => Some(Command::CursorMove(Direction::Right)),
                 KeyCode::Char(c) => Some(Command::Insert(c)),
                 _ => None,
             },
@@ -78,8 +87,8 @@ impl Editor {
 
     pub(crate) fn command(&mut self, command: &Command) -> Option<app::Command> {
         match command {
-            Command::SetMode(mode) => self.mode = *mode,
-            Command::MoveCursor(direction) => match direction {
+            Command::ModeSet(mode) => self.mode = *mode,
+            Command::CursorMove(direction) => match direction {
                 Direction::Up => todo!(),
                 Direction::Down => todo!(),
                 Direction::Left => {
@@ -93,6 +102,23 @@ impl Editor {
                     if let Some(b'\n') = self.cursor.peek_byte() {
                         self.cursor.prev();
                     }
+                }
+            },
+            Command::CursorJump(jump) => match jump {
+                CursorJump::ForwardEndWord => {
+                    while self.cursor.next().is_some() {
+                        match self.cursor.peek_byte() {
+                            None => break,
+                            Some(b' ') | Some(b'\n') => {
+                                self.cursor.prev();
+                                break;
+                            }
+                            _ => { /* continue */ }
+                        }
+                    }
+                }
+                CursorJump::ForwardNextWord => {
+                    todo!()
                 }
             },
             Command::Insert(c) => {
