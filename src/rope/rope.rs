@@ -106,42 +106,6 @@ impl Rope {
         Ok((updated, deleted))
     }
 
-    // pub(super) fn line_range<'a>(&'a self, linenum: usize) -> Option<TreeView<'a>> {
-    //     if self.num_lines() < linenum {
-    //         return None;
-    //     }
-    //     let start = if linenum == 1 {
-    //         Some(0)
-    //     } else {
-    //         byte_offset_for_line(&self.0, linenum - 1).map(|i| i + 1)
-    //     };
-    //     let end = if self.num_lines() == linenum {
-    //         None
-    //     } else {
-    //         byte_offset_for_line(&self.0, linenum).map(|i| i + 1)
-    //     };
-    //     match (start, end) {
-    //         (None, None) => None,
-    //         (None, Some(_)) => unreachable!(),
-    //         (Some(start), None) => {
-    //             if start == self.len() {
-    //                 None
-    //             } else {
-    //                 Some(TreeView::new(self, start..self.len()))
-    //             }
-    //         }
-    //         (Some(start), Some(end)) => Some(TreeView::new(self, start..end)),
-    //     }
-    // }
-
-    // fn leaf_node_at<'a>(&'a self, at: usize) -> Option<(&'a Node, usize)> {
-    //     if at > self.0.len() {
-    //         None
-    //     } else {
-    //         Some(leaf_node_at(self.0.as_ref(), at))
-    //     }
-    // }
-
     #[allow(dead_code)]
     pub(super) fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         writeln!(w, "digraph {{")?;
@@ -159,11 +123,6 @@ impl Rope {
         self.0.to_bstring()
     }
 
-    // fn slice<'a>(&'a self, range: impl RangeBounds<usize>) -> RopeSlice<'a> {
-    //     let range = util::bound_range(&range, 0..self.len());
-    //     RopeSlice::new(self, range)
-    // }
-
     pub(crate) fn chunks(&self, range: impl RangeBounds<usize>) -> Chunks {
         let range = util::bound_range(&range, 0..self.len());
         Chunks::new(self, range)
@@ -179,10 +138,6 @@ impl Rope {
         let range = util::bound_range(&range, 0..self.num_lines());
         Lines::new(self, range)
     }
-
-    // fn lines(&self, range: impl RangeBounds<usize>) -> Lines {
-    //     Lines::new(self, range)
-    // }
 }
 
 fn make_black(node: Arc<Node>) -> Arc<Node> {
@@ -316,12 +271,10 @@ fn join_left(left: NodeWithHeight, right: NodeWithHeight) -> NodeWithHeight {
     if lheight == rheight {
         if let Branch { colour, .. } = right.as_ref() {
             if *colour == NodeColour::Black {
-                // let node = Node::new_branch(NodeColour::Red, left.clone(), right.clone());
                 let (node, _) = balance(NodeColour::Red, left.clone(), right.clone());
                 return (Arc::new(node), lheight);
             }
         } else {
-            // let node = Node::new_branch(NodeColour::Red, left.clone(), right.clone());
             let (node, _) = balance(NodeColour::Red, left.clone(), right.clone());
             return (Arc::new(node), lheight);
         }
@@ -348,8 +301,6 @@ fn join(
         (Some((left, lheight)), Some((right, rheight))) => {
             debug_assert_eq!(lheight, black_height(left.as_ref()));
             debug_assert_eq!(rheight, black_height(right.as_ref()));
-            // let lheight = black_height(left.as_ref());
-            // let rheight = black_height(right.as_ref());
             match rheight.cmp(&lheight) {
                 Ordering::Greater => join_left((left, lheight), (right, rheight)).into(),
                 Ordering::Less => join_right((left, lheight), (right, rheight)).into(),
@@ -400,17 +351,17 @@ fn split_recurse(
 ) -> (Option<NodeWithHeight>, Option<NodeWithHeight>, usize) {
     match node {
         Empty => (None, None, 0),
-        Leaf { slab: block_ref, .. } => {
+        Leaf { slab, .. } => {
             // TODO: stop making copies if possible
             let split_left = if at == 0 {
                 None
             } else {
-                Some((Arc::new(Node::new_leaf(block_ref.substr(..at))), 0))
+                Some((Arc::new(Node::new_leaf(slab.substr(..at))), 0))
             };
-            let split_right = if at == block_ref.len() {
+            let split_right = if at == slab.len() {
                 None
             } else {
-                Some((Arc::new(Node::new_leaf(block_ref.substr(at..))), 0))
+                Some((Arc::new(Node::new_leaf(slab.substr(at..))), 0))
             };
             (split_left, split_right, 0)
         }
@@ -456,114 +407,6 @@ fn black_height(node: &Node) -> usize {
         }
     }
 }
-
-// fn debug_assert_split_balanced(
-//     prefix: &str,
-//     at: usize,
-//     pre_split: &Arc<Node>,
-//     split_left: &Option<(Arc<Node>, usize)>,
-//     split_right: &Option<(Arc<Node>, usize)>,
-// ) {
-//     if cfg!(debug_assertions) {
-//         let left_bal = if let Some((ref node, _)) = split_left {
-//             node.is_balanced()
-//         } else {
-//             true
-//         };
-//         let right_bal = if let Some((ref node, _)) = split_right {
-//             node.is_balanced()
-//         } else {
-//             true
-//         };
-
-//         if !left_bal || !right_bal {
-//             std::fs::create_dir_all("target/assert/").expect("create directory");
-//             let mut file = std::fs::File::create(format!("target/assert/{}_pre_split.dot", prefix))
-//                 .expect("create file");
-//             Tree(pre_split.clone())
-//                 .write_dot(&mut file)
-//                 .expect("write dot file");
-
-//             if let Some((ref node, _)) = split_left {
-//                 let mut file =
-//                     std::fs::File::create(format!("target/assert/{}_split_left.dot", prefix))
-//                         .expect("create file");
-//                 Tree(node.clone())
-//                     .write_dot(&mut file)
-//                     .expect("write dot file");
-//             }
-//             if let Some((ref node, _)) = split_right {
-//                 let mut file =
-//                     std::fs::File::create(format!("target/assert/{}_split_right.dot", prefix))
-//                         .expect("create file");
-//                 Tree(node.clone())
-//                     .write_dot(&mut file)
-//                     .expect("write dot file");
-//             }
-//             assert!(left_bal, "left tree unbalanced {} post split at {}", prefix, at);
-//             assert!(right_bal, "right tree unbalanced {} post split at {}", prefix, at);
-//         }
-//     }
-// }
-
-// fn debug_assert_join_balanced(
-//     prefix: &str,
-//     left: &Option<(Arc<Node>, usize)>,
-//     right: &Option<(Arc<Node>, usize)>,
-//     joined: &Option<(Arc<Node>, usize)>,
-// ) {
-//     if cfg!(debug_assertions) {
-//         let left_bal = if let Some((ref node, _)) = left {
-//             node.is_balanced()
-//         } else {
-//             true
-//         };
-//         let right_bal = if let Some((ref node, _)) = right {
-//             node.is_balanced()
-//         } else {
-//             true
-//         };
-//         let joined_bal = if let Some((ref node, _)) = joined {
-//             node.is_balanced()
-//         } else {
-//             true
-//         };
-
-//         if !left_bal || !right_bal || !joined_bal {
-//             std::fs::create_dir_all("target/assert/").expect("create directory");
-
-//             if let Some((ref node, _)) = left {
-//                 let mut file =
-//                     std::fs::File::create(format!("target/assert/{}_join_left.dot", prefix))
-//                         .expect("create file");
-//                 Tree(node.clone())
-//                     .write_dot(&mut file)
-//                     .expect("write dot file");
-//             }
-
-//             if let Some((ref node, _)) = right {
-//                 let mut file =
-//                     std::fs::File::create(format!("target/assert/{}_join_right.dot", prefix))
-//                         .expect("create file");
-//                 Tree(node.clone())
-//                     .write_dot(&mut file)
-//                     .expect("write dot file");
-//             }
-
-//             if let Some((ref node, _)) = joined {
-//                 let mut file =
-//                     std::fs::File::create(format!("target/assert/{}_joined.dot", prefix))
-//                         .expect("create file");
-//                 Tree(node.clone())
-//                     .write_dot(&mut file)
-//                     .expect("write dot file");
-//             }
-//             assert!(left_bal, "left tree unbalanced {} pre join", prefix);
-//             assert!(right_bal, "right tree unbalanced {} pre join", prefix);
-//             assert!(joined_bal, "joined tree unbalanced {} post join", prefix);
-//         }
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

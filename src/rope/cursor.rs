@@ -85,13 +85,6 @@ impl Cursor {
                         } else {
                             result += bs.len();
                             self.pos = next_leaf(&mut self.parents, leaf);
-                            // match next_leaf(&mut self.parents, leaf) {
-                            //     None => {
-                            //         self.pos = None;
-                            //         return result;
-                            //     }
-                            //     next => self.pos = next,
-                            // }
                         }
                     }
                 },
@@ -122,14 +115,6 @@ impl Cursor {
                         } else {
                             result += bs.len();
                             self.pos = prev_leaf(&mut self.parents, leaf);
-                            // match prev_leaf(&mut self.parents, leaf) {
-                            //     Some(prev) => self.curr_leaf = prev,
-                            //     None => {
-                            //         assert!(self.parents.is_empty());
-                            //         self.curr_leaf = leftmost_leaf(&mut self.parents, &self.rope.0);
-                            //         return result;
-                            //     }
-                            // }
                         }
                     }
                 },
@@ -229,8 +214,7 @@ mod tests {
         let variants = vec![
             build_rope(vec!["0123456789\n"]),
             build_rope(vec!["01", "2345", "6", "789\n"]),
-            // build_rope(vec!["01", "2345", "6", "789", "\n"]),
-            // build_rope(vec!["01", "2345", "6", "789\n0"]),
+            build_rope(vec!["01", "2345", "6", "789", "\n"]),
         ];
 
         const LINE_LEN: usize = 11;
