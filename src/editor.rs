@@ -91,40 +91,56 @@ impl Editor {
             Command::CursorMove(direction) => match direction {
                 Direction::Up => todo!(),
                 Direction::Down => todo!(),
-                Direction::Left => {
-                    self.cursor.prev();
-                    if let Some(b'\n') = self.cursor.peek_byte() {
-                        self.cursor.next();
-                    }
-                }
-                Direction::Right => {
-                    self.cursor.next();
-                    if let Some(b'\n') = self.cursor.peek_byte() {
-                        self.cursor.prev();
-                    }
-                }
+                Direction::Left => self.cursor_move_left(),
+                Direction::Right => self.cursor_move_right(),
             },
             Command::CursorJump(jump) => match jump {
-                CursorJump::ForwardEndWord => {
-                    while self.cursor.next().is_some() {
-                        match self.cursor.peek_byte() {
-                            None => break,
-                            Some(b' ') | Some(b'\n') => {
-                                self.cursor.prev();
-                                break;
-                            }
-                            _ => { /* continue */ }
-                        }
-                    }
-                }
-                CursorJump::ForwardNextWord => {
-                    todo!()
-                }
+                CursorJump::ForwardEndWord => self.cursor_jump_forward_word_end(),
+                CursorJump::ForwardNextWord => self.cursor_jump_forward_word_next(),
             },
             Command::Insert(c) => {
                 return Some(app::Command::BufferInsert(self.buffer_id, *c));
             }
         };
         None
+    }
+
+    fn cursor_move_left(&mut self) -> () {
+        if let Some(b'\n') = self.cursor.prev() {
+            self.cursor.next();
+        }
+    }
+
+    fn cursor_move_right(&mut self) -> () {
+        if let Some(b'\n') = self.cursor.next() {
+            self.cursor.prev();
+        }
+    }
+
+    fn cursor_jump_forward_word_end(&mut self) -> () {
+        loop {
+            match self.cursor.next() {
+                None => break,
+                Some(b' ') | Some(b'\n') => {
+                    self.cursor.prev();
+                    break;
+                }
+                _ => { /* continue */ }
+            }
+        }
+    }
+
+    fn cursor_jump_forward_word_next(&mut self) -> () {
+        self.cursor_jump_forward_word_end();
+        loop {
+            match self.cursor.next() {
+                None => break,
+                Some(b' ') => { /* continue */ }
+                _ => {
+                    self.cursor.prev();
+                    break;
+                }
+            }
+        }
     }
 }

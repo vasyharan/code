@@ -6,45 +6,31 @@ use super::Rope;
 #[derive(Debug)]
 pub(crate) struct Cursor {
     rope: Rope,
-    index: usize,
-    parents: Vec<Arc<Node>>,
-    pos: Option<(Arc<Node>, usize)>,
+    byte_offset: usize,
+    ancestors: Vec<Arc<Node>>,
+    leaf: Option<(Arc<Node>, usize)>,
 }
 
 impl Cursor {
     pub(crate) fn new(rope: Rope) -> Self {
-        Self { rope, index: 0, parents: vec![], pos: None }
+        Self { rope, byte_offset: 0, ancestors: vec![], leaf: None }
     }
 
     pub(crate) fn byte_offset(&self) -> usize {
-        self.index
+        self.byte_offset
     }
 
-    pub(crate) fn next(&mut self) -> Option<(usize, usize)> {
-        let size = 1;
-        match self.forward_by(size) {
-            0 => None,
-            res => {
-                let index = self.index;
-                self.index += res;
-                Some((index, self.index))
-            }
-        }
+    // TODO: make this iterate over graphemes
+    pub(crate) fn next(&mut self) -> Option<u8> {
+        self.forward_byte().and_then(|_| self.peek_byte())
     }
 
-    pub(crate) fn prev(&mut self) -> Option<(usize, usize)> {
-        let size = 1;
-        match self.backward_by(size) {
-            0 => None,
-            res => {
-                let index = self.index;
-                self.index -= res;
-                Some((self.index, index))
-            }
-        }
+    // TODO: make this iterator over graphemes
+    pub(crate) fn prev(&mut self) -> Option<u8> {
+        self.backward_byte().and_then(|_| self.peek_byte())
     }
 
-    pub fn peek_byte(&self) -> Option<u8> {
+    fn peek_byte(&self) -> Option<u8> {
         let bs = self.peek();
         if bs.is_empty() {
             None
@@ -54,76 +40,110 @@ impl Cursor {
     }
 
     fn peek(&self) -> &[u8] {
-        match self.pos {
+        match self.leaf {
             None => &[],
             Some((ref leaf, offset)) => match leaf.as_ref() {
                 Node::Branch { .. } => unreachable!(),
                 Node::Empty => &[],
-                Node::Leaf { slab: block_ref, .. } => &block_ref.as_bytes()[offset..],
+                Node::Leaf { slab, .. } => &slab.as_bytes()[offset..],
             },
         }
     }
 
-    fn forward_by(&mut self, len: usize) -> usize {
-        if self.index == 0 && self.pos.is_none() {
-            assert!(self.parents.is_empty());
-            self.pos = Some(leftmost_leaf(&mut self.parents, &self.rope.0));
+    fn forward_byte(&mut self) -> Option<()> {
+        if self.byte_offset == 0 && self.leaf.is_none() {
+            assert!(self.ancestors.is_empty());
+            self.leaf = Some(leftmost_leaf(&mut self.ancestors, &self.rope.0));
         }
 
-        let mut result = 0;
-        while result < len {
-            match self.pos {
-                None => break,
+        loop {
+            match self.leaf {
+                None => return None,
                 Some((ref leaf, ref mut offset)) => match leaf.as_ref() {
                     Node::Branch { .. } => unreachable!(),
-                    Node::Empty => return 0,
-                    Node::Leaf { slab: block_ref, .. } => {
-                        let bs = &block_ref.as_bytes()[*offset..];
-                        if bs.len() > len {
-                            result += len;
-                            *offset += len;
+                    Node::Empty => return None,
+                    Node::Leaf { slab, .. } => {
+                        let bs = &slab.as_bytes()[*offset..];
+                        if bs.len() > 0 {
+                            *offset += 1;
+                            self.byte_offset += 1;
+                            return Some(());
                         } else {
-                            result += bs.len();
-                            self.pos = next_leaf(&mut self.parents, leaf);
+                            self.leaf = next_leaf(&mut self.ancestors, leaf);
                         }
                     }
                 },
             }
         }
-
-        result
     }
 
-    fn backward_by(&mut self, len: usize) -> usize {
-        if self.index == self.rope.len() && self.pos.is_none() {
-            assert!(self.parents.is_empty());
-            self.pos = Some(rightmost_leaf(&mut self.parents, &self.rope.0));
+    fn backward_byte(&mut self) -> Option<()> {
+        if self.byte_offset == self.rope.len() && self.leaf.is_none() {
+            assert!(self.ancestors.is_empty());
+            self.leaf = Some(rightmost_leaf(&mut self.ancestors, &self.rope.0));
         }
 
-        let mut result = 0;
-        while result < len {
-            match self.pos {
-                None => break,
+        loop {
+            match self.leaf {
+                None => return None,
                 Some((ref leaf, ref mut offset)) => match leaf.as_ref() {
                     Node::Branch { .. } => unreachable!(),
-                    Node::Empty => return 0,
-                    Node::Leaf { slab: block_ref, .. } => {
-                        let bs = &block_ref.as_bytes()[..*offset];
-                        if bs.len() >= len {
-                            result += len;
-                            *offset -= len;
+                    Node::Empty => return None,
+                    Node::Leaf { slab, .. } => {
+                        let bs = &slab.as_bytes()[..*offset];
+                        if bs.len() >= 1 {
+                            *offset -= 1;
+                            self.byte_offset -= 1;
+                            return Some(());
                         } else {
-                            result += bs.len();
-                            self.pos = prev_leaf(&mut self.parents, leaf);
+                            self.leaf = prev_leaf(&mut self.ancestors, leaf);
                         }
                     }
                 },
             }
         }
-
-        result
     }
 }
+
+// #[derive(Debug, Clone)]
+// struct LeafNodes {
+//     ancestors: Vec<Arc<Node>>,
+//     curr: Option<Arc<Node>>,
+// }
+
+// impl LeafNodes {
+//     fn new(rope: Rope) -> Self {
+//         Self { ancestors: vec![], curr: None }
+//     }
+
+//     fn next(&mut self) -> Option<Arc<Node>> {
+//         if self.byte_offset == 0 && self.curr.is_none() {
+//             assert!(self.ancestors.is_empty());
+//             self.curr = Some(leftmost_leaf2(&mut self.ancestors, &self.rope.0));
+//         }
+//         if self.curr.is_none() {
+//             return None;
+//         }
+
+//         let next = self.curr.take().unwrap();
+//         self.curr = next_leaf2(&mut self.ancestors, &next);
+//         Some(next)
+//     }
+
+//     fn prev(&mut self) -> Option<Arc<Node>> {
+//         if self.curr.is_none() {
+//             return None;
+//         }
+
+//         let next = self.curr.take().unwrap();
+//         self.curr = next_leaf2(&mut self.ancestors, &next);
+//         Some(next)
+//     }
+// }
+
+// fn leftmost_leaf2(ancestors: &mut Vec<Arc<Node>>, from_node: &Arc<Node>) -> Arc<Node> {
+//     leftmost_leaf(ancestors, from_node).0
+// }
 
 fn leftmost_leaf(parents: &mut Vec<Arc<Node>>, from_node: &Arc<Node>) -> (Arc<Node>, usize) {
     let mut maybe_node = Some(from_node);
@@ -159,6 +179,10 @@ fn rightmost_leaf(parents: &mut Vec<Arc<Node>>, from_node: &Arc<Node>) -> (Arc<N
     unreachable!()
 }
 
+// fn next_leaf2(ancestors: &mut Vec<Arc<Node>>, from_leaf: &Arc<Node>) -> Option<Arc<Node>> {
+//     next_leaf(ancestors, from_leaf).map(|r| r.0)
+// }
+
 fn next_leaf(parents: &mut Vec<Arc<Node>>, from_leaf: &Arc<Node>) -> Option<(Arc<Node>, usize)> {
     let mut search_node: Option<Arc<Node>> = Some(from_leaf.clone());
     while search_node.is_some() && !parents.is_empty() {
@@ -181,6 +205,10 @@ fn next_leaf(parents: &mut Vec<Arc<Node>>, from_leaf: &Arc<Node>) -> Option<(Arc
 
     None
 }
+
+// fn prev_leaf2(ancestors: &mut Vec<Arc<Node>>, from_leaf: &Arc<Node>) -> Option<Arc<Node>> {
+//     prev_leaf(ancestors, from_leaf).map(|r| r.0)
+// }
 
 fn prev_leaf(parents: &mut Vec<Arc<Node>>, from_leaf: &Arc<Node>) -> Option<(Arc<Node>, usize)> {
     let mut search_node: Option<Arc<Node>> = Some(from_leaf.clone());
@@ -212,20 +240,18 @@ mod tests {
     #[test]
     fn cursor_next_prev() {
         let variants = vec![
-            build_rope(vec!["0123456789\n"]),
-            build_rope(vec!["01", "2345", "6", "789\n"]),
-            build_rope(vec!["01", "2345", "6", "789", "\n"]),
+            build_rope(vec!["0123456789\n123"]),
+            build_rope(vec!["01", "2345", "6", "789\n1", "23"]),
+            build_rope(vec!["01", "2345", "6", "789", "\n", "123"]),
         ];
 
-        const LINE_LEN: usize = 11;
-        let line = "0123456789\n".as_bytes();
+        const LINE_LEN: usize = 14;
         for (_variant, rope) in variants.iter().enumerate() {
             let mut cursor = rope.cursor();
             let bstr = rope.to_bstring();
             for i in 0..LINE_LEN {
                 let next = cursor.next();
-                assert_eq!(next, Some((i, i + 1)));
-                assert_eq!(bstr[i], line[i]);
+                assert_eq!(next, Some(bstr[i]));
 
                 assert_eq!(cursor.prev(), next);
                 assert_eq!(cursor.next(), next);
@@ -235,8 +261,7 @@ mod tests {
             for i in 0..LINE_LEN {
                 let i = LINE_LEN - i - 1;
                 let prev = cursor.prev();
-                assert_eq!(prev, Some((i, i + 1)));
-                assert_eq!(bstr[i], line[i]);
+                assert_eq!(prev, Some(bstr[i]));
 
                 assert_eq!(cursor.next(), prev);
                 assert_eq!(cursor.prev(), prev);
