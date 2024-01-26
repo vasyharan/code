@@ -3,21 +3,38 @@ use std::sync::Arc;
 use super::tree::Node;
 use super::Rope;
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Point {
+    pub(crate) line: usize,
+    pub(crate) column: usize,
+}
+
+impl Default for Point {
+    fn default() -> Self {
+        Self { line: 1, column: 1 }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Cursor {
     rope: Rope,
     byte_offset: usize,
+    point: Point,
     ancestors: Vec<Arc<Node>>,
     leaf: Option<(Arc<Node>, usize)>,
 }
 
 impl Cursor {
     pub(crate) fn new(rope: Rope) -> Self {
-        Self { rope, byte_offset: 0, ancestors: vec![], leaf: None }
+        Self { rope, byte_offset: 0, point: Point::default(), ancestors: vec![], leaf: None }
     }
 
     pub(crate) fn byte_offset(&self) -> usize {
         self.byte_offset
+    }
+
+    pub(crate) fn point(&self) -> Point {
+        self.point
     }
 
     // TODO: make this iterate over graphemes
@@ -65,6 +82,12 @@ impl Cursor {
                     Node::Leaf { slab, .. } => {
                         let bs = &slab.as_bytes()[*offset..];
                         if bs.len() > 0 {
+                            if bs[0] == b'\n' {
+                                self.point.line += 1;
+                                self.point.column = 1;
+                            } else {
+                                self.point.column += 1;
+                            }
                             *offset += 1;
                             self.byte_offset += 1;
                             return Some(());
@@ -92,6 +115,13 @@ impl Cursor {
                     Node::Leaf { slab, .. } => {
                         let bs = &slab.as_bytes()[..*offset];
                         if bs.len() >= 1 {
+                            if bs[bs.len() - 1] == b'\n' {
+                                self.point.line -= 1;
+                                // TODO: fix me count columns in line
+                                self.point.column = 1;
+                            } else {
+                                self.point.column -= 1;
+                            }
                             *offset -= 1;
                             self.byte_offset -= 1;
                             return Some(());

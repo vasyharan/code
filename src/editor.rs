@@ -27,14 +27,14 @@ pub(crate) enum Command {
     Insert(char),
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct Position(pub(crate) usize);
+// #[derive(Debug, Default)]
+// pub(crate) struct Position(pub(crate) usize);
 
-impl From<usize> for Position {
-    fn from(value: usize) -> Self {
-        Position(value)
-    }
-}
+// impl From<usize> for Position {
+//     fn from(value: usize) -> Self {
+//         Position(value)
+//     }
+// }
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) enum Mode {

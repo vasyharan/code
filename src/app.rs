@@ -126,11 +126,9 @@ async fn main_loop(mut app_rx: mpsc::Receiver<Command>) -> Result<()> {
             let buffer: &Buffer = &app.buffers[buffer_id];
             let editor: &Editor = &buffer.editors[editor_id];
             let pane = crate::widgets::EditorPane::new(&app.theme, buffer, editor);
-            let cursor_pos = pane
-                .screen_cursor_position((area.width, area.height))
-                .unwrap();
+            let cursor_pos = pane.screen_cursor_position(area).unwrap();
             frame.render_widget(pane, area);
-            frame.set_cursor(cursor_pos.0, cursor_pos.1);
+            frame.set_cursor(cursor_pos.column, cursor_pos.row);
         })?;
 
         let mut maybe_command = tokio::select! {
