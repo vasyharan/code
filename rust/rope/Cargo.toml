@@ -1,0 +1,14 @@
+[package]
+edition = "2021"
+name = "rope"
+version = "0.1.0"
+
+[lib]
+path = "src/rope.rs"
+doctest = false
+
+[dependencies]
+sumtree.workspace = true
+
+bytecount.workspace = true
+tokio.workspace = true

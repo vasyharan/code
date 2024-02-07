@@ -1,0 +1,11 @@
+[package]
+edition = "2021"
+name = "sumtree"
+version = "0.1.0"
+
+[lib]
+path = "src/sumtree.rs"
+doctest = false
+
+[dependencies]
+tokio.workspace = true

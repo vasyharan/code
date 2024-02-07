@@ -10,7 +10,7 @@ const BLOCK_CAPACITY: usize = 4096;
 #[derive(Debug)]
 struct SlabBlock([u8; BLOCK_CAPACITY]); // TODO: tune size of byte array
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Slab(Arc<SlabBlock>, Range<usize>);
 
 impl Slab {
