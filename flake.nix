@@ -25,6 +25,10 @@
           file = ./rust-toolchain.toml;
           sha256 = "sha256-sH6tcgUqft0TlybCuF4LirxmePW09mZDgu/SFP1bxGE=";
         };
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
       in {
       devShells.default = pkgs.mkShell {
         buildInputs = [
@@ -34,5 +38,11 @@
           cargo-watch
         ];
       };
+      packages.default = rustPlatform.buildRustPackage {
+          pname = "toku";
+          version = "0.1.0";
+          src = ./.;
+          cargoLock.lockFile = ./Cargo.lock;
+        };
     });
 }
