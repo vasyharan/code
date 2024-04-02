@@ -45,7 +45,7 @@ COPY <<EOF /home/gitpod/.config/direnv/config.toml
 prefix = [ "/workspace" ]
 EOF
 
-COPY ./flake.* /tmp/flake/
+COPY ./rust-toolchain.toml ./flake.* /tmp/flake/
 RUN cd /tmp/flake/ \
   && . /home/gitpod/.nix-profile/etc/profile.d/nix.sh \
   && nix develop --accept-flake-config --command bash -c 'true' 
