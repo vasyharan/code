@@ -29,7 +29,7 @@ fn main() -> Result<()> {
     setup_logging()?;
     terminal_enter(supports_keyboard_enhancement)?;
 
-    let res = App::run();
+    let res = App::spawn(args.paths);
     terminal_exit(supports_keyboard_enhancement)?;
     res
 }

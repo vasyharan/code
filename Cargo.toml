@@ -2,12 +2,21 @@
 resolver = "2"
 members = [
     "crates/toku",
+    "crates/editor",
+    "crates/ui",
 ]
 
 [workspace.dependencies]
+ui = { path = "./crates/ui" }
+editor = { path = "./crates/editor" }
+
 anyhow = "1.0.75"
 futures = "0.3.29"
 lazy_static = "1.4.0"
+slotmap = "1.0.7"
+ratatui = { version = "0.24.0", default-features = false, features = [
+    "crossterm",
+] }
 tokio = { version = "1", default-features = false, features = [
     "macros",
     "rt-multi-thread",
