@@ -37,6 +37,10 @@
         packages = with pkgs; [
           cargo-watch
         ];
+        shellHook = ''
+          RUST_LOG=info
+          RUST_BACKTRACE=1
+        '';
       };
       packages.default = rustPlatform.buildRustPackage {
           pname = "toku";

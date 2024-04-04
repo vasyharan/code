@@ -1,8 +1,8 @@
 use anyhow::Result;
+use crossterm::event::Event;
+use editor::{Buffer, BufferId, Editor};
 use slotmap::SlotMap;
 use tokio::sync::mpsc;
-
-use editor::{Buffer, BufferId, Editor};
 
 type BufferMap = SlotMap<BufferId, Buffer>;
 
@@ -10,6 +10,8 @@ type BufferMap = SlotMap<BufferId, Buffer>;
 pub enum Command {
     Quit,
     FileOpen(std::path::PathBuf),
+
+    EditorCommand(editor::Command),
 }
 
 #[derive(Debug)]
@@ -64,7 +66,7 @@ impl App {
                 maybe_command = self.cmd_rx.recv() => { maybe_command }
                 maybe_event = events.next().fuse() => {
                     match maybe_event {
-                        Some(event) => self.process_event(event?),
+                        Some(event) => self.process_event(&editor, event?),
                         None => break 'main,
                     }
                 }
@@ -75,6 +77,7 @@ impl App {
 
                 match command {
                     Quit => break 'main,
+                    EditorCommand(cmd) => editor.command(cmd),
                     FileOpen(path) => {
                         let buffer_id: BufferId =
                             buffers.try_insert_with_key(|k| Buffer::open(k, &path))?;
@@ -88,24 +91,28 @@ impl App {
     }
 
     #[tracing::instrument(skip(self))]
-    fn process_event(&self, ev: crossterm::event::Event) -> Option<Command> {
-        use crossterm::event::{Event, KeyCode, KeyModifiers};
+    fn process_event(&self, editor: &Editor, ev: Event) -> Option<Command> {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
         match ev {
             Event::FocusGained => todo!(),
             Event::FocusLost => todo!(),
             Event::Paste(_) => todo!(),
             Event::Mouse(_) => todo!(),
             Event::Resize(_, _) => todo!(),
-            Event::Key(key) => match key.code {
-                KeyCode::Char(c) => {
-                    if c == 'c' && key.modifiers.contains(KeyModifiers::CONTROL) {
-                        Some(Command::Quit)
-                    } else {
-                        None
+            Event::Key(key) => {
+                let command = match key.code {
+                    KeyCode::Char(c) => {
+                        if c == 'c' && key.modifiers.contains(KeyModifiers::CONTROL) {
+                            Some(Command::Quit)
+                        } else {
+                            None
+                        }
                     }
-                }
-                _ => None,
-            },
+                    _ => None,
+                };
+                command.or_else(|| editor.process_key(key).map(Command::EditorCommand))
+            }
         }
     }
 }

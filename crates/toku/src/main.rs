@@ -46,7 +46,6 @@ fn setup_logging() -> Result<()> {
     let log_path = xdg_dirs
         .place_data_file(LOG_FILE.clone())
         .expect("cannot create data file");
-    println!("{:?}", log_path);
     let log_file = std::fs::File::create(log_path)?;
 
     std::env::set_var(
