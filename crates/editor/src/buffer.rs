@@ -17,19 +17,25 @@ pub struct Buffer {
 
 impl Buffer {
     pub fn empty(id: Id) -> Self {
-        Self { id, lines: vec![] }
+        Self::new(id, vec![])
     }
 
-    pub fn open(id: Id, filename: &PathBuf) -> Result<Self> {
-        use std::fs::File;
-        use std::io::BufRead;
-        use std::io::BufReader;
+    pub fn new(id: Id, lines: Vec<String>) -> Self {
+        Self { id, lines }
+    }
 
-        let file = File::open(filename)?;
-        let rd = BufReader::new(&file);
-        let lines: std::io::Result<Vec<String>> = rd.lines().collect();
+    pub async fn read(filename: &PathBuf) -> Result<Vec<String>> {
+        use tokio::fs::File;
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        use tokio_stream::wrappers::LinesStream;
+        use tokio_stream::StreamExt;
+
+        let mut file = File::open(filename).await?;
+        let rd = BufReader::new(&mut file);
+        let lines = LinesStream::new(rd.lines());
+        let lines: std::io::Result<Vec<String>> = lines.collect().await;
         let lines = lines?;
-        Ok(Self { id, lines })
+        Ok(lines)
     }
 
     pub fn lines(&self, range: Range<usize>) -> &[String] {

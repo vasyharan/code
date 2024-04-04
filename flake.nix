@@ -38,8 +38,8 @@
           cargo-watch
         ];
         shellHook = ''
-          RUST_LOG=info
-          RUST_BACKTRACE=1
+          export RUST_LOG="info"
+          export RUST_BACKTRACE=1
         '';
       };
       packages.default = rustPlatform.buildRustPackage {

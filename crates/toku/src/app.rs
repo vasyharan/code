@@ -79,8 +79,7 @@ impl App {
                     Quit => break 'main,
                     EditorCommand(cmd) => editor.command(cmd),
                     FileOpen(path) => {
-                        let buffer_id: BufferId =
-                            buffers.try_insert_with_key(|k| Buffer::open(k, &path))?;
+                        let buffer_id = self.file_open(&mut buffers, &path).await?;
                         editor = Editor::new(&mut buffers[buffer_id]);
                     }
                 }
@@ -90,7 +89,17 @@ impl App {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, buffers))]
+    async fn file_open(
+        &self,
+        buffers: &mut BufferMap,
+        path: &std::path::PathBuf,
+    ) -> Result<BufferId> {
+        let lines = Buffer::read(&path).await?;
+        Ok(buffers.insert_with_key(|k| Buffer::new(k, lines)))
+    }
+
+    #[tracing::instrument(skip(self, editor, ev))]
     fn process_event(&self, editor: &Editor, ev: Event) -> Option<Command> {
         use crossterm::event::{KeyCode, KeyModifiers};
 
