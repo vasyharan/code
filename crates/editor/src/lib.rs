@@ -1,15 +1,18 @@
 mod buffer;
 mod editor;
 
-pub use buffer::{Buffer, Contents as BufferContents, Id as BufferId};
+pub use buffer::{
+    Buffer, Command as BufferCommand, Contents as BufferContents, Highlights, Id as BufferId, Lines,
+};
 pub use editor::{Command as EditorCommand, Editor, Id as EditorId};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Command {
     Editor(EditorId, EditorCommand),
+    Buffer(BufferId, BufferCommand),
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialOrd, PartialEq)]
 pub struct Point {
     pub line: usize,
     pub column: usize,

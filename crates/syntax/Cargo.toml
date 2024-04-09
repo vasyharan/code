@@ -1,18 +1,21 @@
 [package]
-name = "editor"
+name = "syntax"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [lib]
-name = "editor"
+name = "syntax"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-anyhow.workspace = true
-crossterm.workspace = true
-slotmap.workspace = true
-tokio.workspace = true
-iset.workspace = true
+editor.workspace = true
 
-tokio-stream = {version = "0.1", features = ["io-util"]}
+anyhow.workspace = true
+futures.workspace = true
+iset.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+tree-sitter = "0.20"
+tree-sitter-rust = "0.20"

@@ -26,14 +26,14 @@ impl App {
         rt.block_on(async move {
             let (cmd_tx, cmd_rx) = mpsc::channel(1);
             let app = Self::new(cmd_rx);
-            let run = tokio::spawn(app.run());
+            let app = tokio::spawn(app.run());
             if let Some(paths) = paths {
                 for p in paths.iter() {
                     cmd_tx.send(Command::FileOpen(p.clone())).await?;
                 }
             }
 
-            run.await?
+            app.await?
         })
     }
 
@@ -49,7 +49,9 @@ impl App {
 
         let mut term = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
         let mut events = EventStream::new();
+        let mut syntax = syntax::Client::spawn();
 
+        let theme = ui::Theme::default();
         let mut buffers = BufferMap::with_key();
         let mut editors = EditorMap::with_key();
         let mut editor_id: EditorId = editors.insert_with_key(|k| {
@@ -62,7 +64,7 @@ impl App {
                 let area = frame.size();
                 let editor = &editors[editor_id];
                 let buffer = &buffers[editor.buffer_id];
-                let pane = ui::EditorPane::new(buffer, editor);
+                let pane = ui::EditorPane::new(&theme, buffer, editor);
                 frame.render_widget(pane, area);
 
                 let cursor = editor.cursor;
@@ -71,6 +73,12 @@ impl App {
 
             let mut maybe_command = tokio::select! {
                 maybe_command = self.cmd_rx.recv() => { maybe_command }
+                maybe_syntax_event = syntax.next().fuse() => {
+                    match maybe_syntax_event {
+                        Some(event) => self.process_syntax(event),
+                        None => panic!("syntax thread crashed?"),
+                    }
+                }
                 maybe_event = events.next().fuse() => {
                     match maybe_event {
                         Some(event) => {
@@ -94,10 +102,27 @@ impl App {
                             let buffer = &mut buffers[editor.buffer_id];
                             editor.command(&buffer, cmd);
                         }
+                        editor::Command::Buffer(buffer_id, cmd) => {
+                            let buffer = &mut buffers[buffer_id];
+                            buffer.command(cmd);
+                        }
                     },
                     FileOpen(path) => {
                         let contents = self.file_open(&path).await?;
-                        let buffer_id = buffers.insert_with_key(|k| Buffer::new(k, contents));
+                        let buffer_id =
+                            buffers.insert_with_key(|k| Buffer::new(k, contents.clone()));
+                        match syntax::Language::try_from(&buffers[buffer_id]) {
+                            Ok(language) => {
+                                syntax
+                                    .command(syntax::Command::Parse {
+                                        buffer_id,
+                                        contents,
+                                        language,
+                                    })
+                                    .await?;
+                            }
+                            _ => todo!(),
+                        };
                         editor_id = editors.insert_with_key(|k| Editor::new(k, buffer_id));
                     }
                 }
@@ -110,6 +135,15 @@ impl App {
     #[tracing::instrument(skip(self))]
     async fn file_open(&self, path: &std::path::PathBuf) -> Result<BufferContents> {
         Buffer::read(&path).await
+    }
+
+    fn process_syntax(&self, ev: syntax::Event) -> Option<Command> {
+        match ev {
+            syntax::Event::Hightlight(buffer_id, hls) => Some(Command::EditorCommand(
+                editor::Command::Buffer(buffer_id, editor::BufferCommand::Highlight(hls)),
+            )),
+            _ => None,
+        }
     }
 
     #[tracing::instrument(skip(self, editor, buffer, ev))]

@@ -2,14 +2,21 @@ use editor::{Buffer, Editor};
 use ratatui::prelude as tui;
 use ratatui::widgets::Widget;
 
+use crate::Theme;
+
 pub struct EditorPane<'a> {
+    theme: &'a Theme,
     buffer: &'a Buffer,
     editor: &'a Editor,
 }
 
 impl<'a> EditorPane<'a> {
-    pub fn new(buffer: &'a Buffer, editor: &'a Editor) -> Self {
-        Self { buffer, editor }
+    pub fn new(theme: &'a Theme, buffer: &'a Buffer, editor: &'a Editor) -> Self {
+        Self {
+            theme,
+            buffer,
+            editor,
+        }
     }
 
     fn screen_offset(&self, dims: tui::Rect) -> editor::Point {
@@ -37,13 +44,28 @@ impl Widget for EditorPane<'_> {
         let mut lines = self
             .buffer
             .contents
-            .lines(offset.line..(offset.line + dims.height as usize));
+            .lines(offset.line..(offset.line + dims.height as usize))
+            .enumerate();
         let x = dims.left();
         for y in dims.top()..dims.bottom() {
-            if let Some(line) = lines.next() {
+            if let Some((yoffset, line)) = lines.next() {
                 for (xoffset, c) in line.into_iter().enumerate() {
                     let x = x + (xoffset as u16); // FIXME: downcast here!
                     let cell = buf.get_mut(x, y);
+                    // let char_range = byte_offset..(byte_offset + 1);
+                    let start = editor::Point {
+                        line: yoffset + y as usize,
+                        column: xoffset + x as usize,
+                    };
+                    let end = editor::Point {
+                        line: yoffset + y as usize,
+                        column: xoffset + 1 + x as usize,
+                    };
+                    if let Some((_, name)) = self.buffer.highlights.iter(start..end).next() {
+                        if let Some(color) = self.theme.colour(name) {
+                            cell.set_fg(color.0);
+                        }
+                    }
                     cell.set_char(*c as char);
                 }
             } else {

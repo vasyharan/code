@@ -5,14 +5,22 @@ use std::path::PathBuf;
 
 use crate::Point;
 
+pub type Highlights = iset::IntervalMap<Point, String>;
+
 new_key_type! {
     pub struct Id;
+}
+
+#[derive(Debug)]
+pub enum Command {
+    Highlight(Highlights),
 }
 
 #[derive(Debug)]
 pub struct Buffer {
     pub id: Id,
     pub contents: Contents,
+    pub highlights: Highlights,
 }
 
 impl Buffer {
@@ -21,7 +29,11 @@ impl Buffer {
     }
 
     pub fn new(id: Id, contents: Contents) -> Self {
-        Self { id, contents }
+        Self {
+            id,
+            contents,
+            highlights: Default::default(),
+        }
     }
 
     pub async fn read(filename: &PathBuf) -> Result<Contents> {
@@ -37,9 +49,15 @@ impl Buffer {
         let lines = lines?;
         Ok(Contents(lines))
     }
+
+    pub fn command(&mut self, command: Command) -> () {
+        match command {
+            Command::Highlight(hls) => self.highlights = hls,
+        }
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Contents(Vec<String>);
 
 impl Contents {

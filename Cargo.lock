@@ -233,6 +233,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "iset",
  "slotmap",
  "tokio",
  "tokio-stream",
@@ -372,6 +373,12 @@ name = "indoc"
 version = "2.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b248f5224d1d606005e02c97f5aa4e88eeb230488bcc03bc9ca4d7991399f2b5"
+
+[[package]]
+name = "iset"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0716a0d7080cb7b20b9426276315e6ff5ed537bd920af47417b16de07f9ac76"
 
 [[package]]
 name = "itertools"
@@ -747,6 +754,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "syntax"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "editor",
+ "futures",
+ "iset",
+ "tokio",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-rust",
+]
+
+[[package]]
 name = "thread_local"
 version = "1.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -804,6 +825,7 @@ dependencies = [
  "lazy_static",
  "ratatui",
  "slotmap",
+ "syntax",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -870,6 +892,26 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "tree-sitter"
+version = "0.20.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e747b1f9b7b931ed39a548c1fae149101497de3c1fc8d9e18c62c1a66c683d3d"
+dependencies = [
+ "cc",
+ "regex",
+]
+
+[[package]]
+name = "tree-sitter-rust"
+version = "0.20.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0832309b0b2b6d33760ce5c0e818cb47e1d72b468516bfe4134408926fa7594"
+dependencies = [
+ "cc",
+ "tree-sitter",
 ]
 
 [[package]]
