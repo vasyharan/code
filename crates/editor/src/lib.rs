@@ -9,7 +9,7 @@ pub enum Command {
     Editor(EditorId, EditorCommand),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Point {
     pub line: usize,
     pub column: usize,
@@ -24,7 +24,7 @@ impl Point {
     }
 
     pub fn prev_column(&self) -> Self {
-        if self.column == 1 {
+        if self.column == 0 {
             self.clone()
         } else {
             Self {
@@ -42,7 +42,7 @@ impl Point {
     }
 
     pub fn prev_line(&self) -> Self {
-        if self.line == 1 {
+        if self.line == 0 {
             self.clone()
         } else {
             Self {
@@ -50,11 +50,5 @@ impl Point {
                 column: self.column,
             }
         }
-    }
-}
-
-impl Default for Point {
-    fn default() -> Self {
-        Self { line: 1, column: 1 }
     }
 }

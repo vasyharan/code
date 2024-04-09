@@ -103,15 +103,18 @@ impl Editor {
 
     fn cursor_move_up(&mut self, buffer: &Buffer) -> () {
         self.cursor = self.cursor.prev_line();
-        match buffer.line_at(self.cursor.line) {
+        match buffer.contents.line_at(self.cursor.line) {
             None => (),
-            Some(line) => self.cursor.column = std::cmp::min(line.len(), self.cursor.column),
+            Some(line) => {
+                let len = if line.len() > 0 { line.len() - 1 } else { 0 };
+                self.cursor.column = std::cmp::min(len, self.cursor.column)
+            }
         }
     }
 
     fn cursor_move_right(&mut self, buffer: &Buffer) -> () {
         let next_cursor = self.cursor.next_column();
-        match buffer.char_at(next_cursor) {
+        match buffer.contents.char_at(next_cursor) {
             None | Some(b'\n') => (),
             _ => self.cursor = next_cursor,
         }
@@ -119,11 +122,12 @@ impl Editor {
 
     fn cursor_move_down(&mut self, buffer: &Buffer) -> () {
         let next_cursor = self.cursor.next_line();
-        match buffer.line_at(next_cursor.line) {
+        match buffer.contents.line_at(next_cursor.line) {
             None => (),
             Some(line) => {
                 self.cursor = next_cursor;
-                self.cursor.column = std::cmp::min(line.len(), self.cursor.column);
+                let len = if line.len() > 0 { line.len() - 1 } else { 0 };
+                self.cursor.column = std::cmp::min(len, self.cursor.column);
             }
         }
     }

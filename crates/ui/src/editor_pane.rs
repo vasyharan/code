@@ -36,15 +36,15 @@ impl Widget for EditorPane<'_> {
         let offset = self.screen_offset(dims);
         let mut lines = self
             .buffer
-            .lines(offset.line..(offset.line + dims.height as usize))
-            .iter();
+            .contents
+            .lines(offset.line..(offset.line + dims.height as usize));
         let x = dims.left();
         for y in dims.top()..dims.bottom() {
             if let Some(line) = lines.next() {
-                for (xoffset, c) in line.chars().enumerate() {
+                for (xoffset, c) in line.into_iter().enumerate() {
                     let x = x + (xoffset as u16); // FIXME: downcast here!
                     let cell = buf.get_mut(x, y);
-                    cell.set_char(c);
+                    cell.set_char(*c as char);
                 }
             } else {
                 buf.get_mut(x, y).set_char('~');

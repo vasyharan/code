@@ -63,9 +63,10 @@ impl App {
                 let editor = &editors[editor_id];
                 let buffer = &buffers[editor.buffer_id];
                 let pane = ui::EditorPane::new(buffer, editor);
-                let cursor = editor.cursor;
                 frame.render_widget(pane, area);
-                frame.set_cursor((cursor.column - 1) as u16, (cursor.line - 1) as u16);
+
+                let cursor = editor.cursor;
+                frame.set_cursor(cursor.column as u16, cursor.line as u16);
             })?;
 
             let mut maybe_command = tokio::select! {
