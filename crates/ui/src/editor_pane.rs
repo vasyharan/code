@@ -12,11 +12,7 @@ pub struct EditorPane<'a> {
 
 impl<'a> EditorPane<'a> {
     pub fn new(theme: &'a Theme, buffer: &'a Buffer, editor: &'a Editor) -> Self {
-        Self {
-            theme,
-            buffer,
-            editor,
-        }
+        Self { theme, buffer, editor }
     }
 
     fn screen_offset(&self, dims: tui::Rect) -> editor::Point {
@@ -53,10 +49,8 @@ impl Widget for EditorPane<'_> {
                     let x = x + (xoffset as u16); // FIXME: downcast here!
                     let cell = buf.get_mut(x, y);
                     // let char_range = byte_offset..(byte_offset + 1);
-                    let start = editor::Point {
-                        line: yoffset + y as usize,
-                        column: xoffset + x as usize,
-                    };
+                    let start =
+                        editor::Point { line: yoffset + y as usize, column: xoffset + x as usize };
                     let end = editor::Point {
                         line: yoffset + y as usize,
                         column: xoffset + 1 + x as usize,

@@ -36,11 +36,7 @@ impl Worker {
                 while let Some(ev) = rx.recv().await {
                     use Command::*;
                     match ev {
-                        Parse {
-                            buffer_id,
-                            contents,
-                            language,
-                        } => {
+                        Parse { buffer_id, contents, language } => {
                             let span = tracing::info_span!("parse_ts_tree").entered();
                             parser.set_language(language.ts)?;
                             let ts_text = BufferContentsTextProvider(&contents);
@@ -79,11 +75,7 @@ impl Client {
         let (cmd_tx, cmd_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::channel(1);
         let worker = Worker::spawn(cmd_rx, event_tx);
-        Client {
-            cmd_tx,
-            event_rx,
-            worker,
-        }
+        Client { cmd_tx, event_rx, worker }
     }
 
     pub async fn command(&self, command: Command) -> Result<()> {

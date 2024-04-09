@@ -44,12 +44,7 @@ pub struct Editor {
 
 impl Editor {
     pub fn new(id: Id, buffer_id: BufferId) -> Self {
-        Self {
-            id,
-            buffer_id,
-            mode: Default::default(),
-            cursor: Default::default(),
-        }
+        Self { id, buffer_id, mode: Default::default(), cursor: Default::default() }
     }
 
     pub fn process_key(&mut self, key: KeyEvent, buffer: &Buffer) -> Option<crate::Command> {

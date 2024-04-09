@@ -34,14 +34,8 @@ impl<'a> ts::TextProvider<'a> for BufferContentsTextProvider<'a> {
 
     fn text(&mut self, node: ts::Node) -> Self::I {
         let range = node.range();
-        let start = editor::Point {
-            line: range.start_point.row,
-            column: range.start_point.column,
-        };
-        let end = editor::Point {
-            line: range.end_point.row,
-            column: range.end_point.column,
-        };
+        let start = editor::Point { line: range.start_point.row, column: range.start_point.column };
+        let end = editor::Point { line: range.end_point.row, column: range.end_point.column };
         self.0.range(start, end)
     }
 }

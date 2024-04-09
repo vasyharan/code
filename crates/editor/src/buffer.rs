@@ -29,11 +29,7 @@ impl Buffer {
     }
 
     pub fn new(id: Id, contents: Contents) -> Self {
-        Self {
-            id,
-            contents,
-            highlights: Default::default(),
-        }
+        Self { id, contents, highlights: Default::default() }
     }
 
     pub async fn read(filename: &PathBuf) -> Result<Contents> {
@@ -62,22 +58,12 @@ pub struct Contents(Vec<String>);
 
 impl Contents {
     pub fn range(&self, start: Point, end: Point) -> Lines {
-        Lines {
-            contents: self,
-            start,
-            end,
-        }
+        Lines { contents: self, start, end }
     }
 
     pub fn lines(&self, range: Range<usize>) -> Lines {
-        let start = Point {
-            line: range.start,
-            column: 0,
-        };
-        let end = Point {
-            line: range.end,
-            column: 0,
-        };
+        let start = Point { line: range.start, column: 0 };
+        let end = Point { line: range.end, column: 0 };
         self.range(start, end)
     }
 
@@ -119,10 +105,7 @@ impl<'a> Iterator for Lines<'a> {
         match self.contents.line_at(start.line) {
             None => None,
             Some(line) => {
-                self.start = Point {
-                    line: start.line + 1,
-                    column: 0,
-                };
+                self.start = Point { line: start.line + 1, column: 0 };
                 if start.column < line.as_bytes().len() {
                     if start.line == self.end.line {
                         if self.end.column < line.as_bytes().len() {
