@@ -1,14 +1,15 @@
-use editor::Editor;
+use editor::{Buffer, Editor};
 use ratatui::prelude as tui;
 use ratatui::widgets::Widget;
 
 pub struct EditorPane<'a> {
-    editor: &'a Editor<'a>,
+    buffer: &'a Buffer,
+    editor: &'a Editor,
 }
 
 impl<'a> EditorPane<'a> {
-    pub fn new(editor: &'a Editor) -> Self {
-        Self { editor }
+    pub fn new(buffer: &'a Buffer, editor: &'a Editor) -> Self {
+        Self { buffer, editor }
     }
 
     fn screen_offset(&self, dims: tui::Rect) -> editor::Point {
@@ -34,7 +35,6 @@ impl Widget for EditorPane<'_> {
     fn render(self, dims: tui::Rect, buf: &mut tui::Buffer) {
         let offset = self.screen_offset(dims);
         let mut lines = self
-            .editor
             .buffer
             .lines(offset.line..(offset.line + dims.height as usize))
             .iter();
