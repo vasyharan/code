@@ -17,7 +17,7 @@ impl<'a> BufferContentsTextProvider<'a> {
             self.0
                 .line_at(pos.row + 1)
                 .map(|line| {
-                    let column = pos.column as usize;
+                    let column = pos.column;
                     if column < line.as_bytes().len() {
                         &line.as_bytes()[column..]
                     } else {

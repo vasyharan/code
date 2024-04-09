@@ -12,7 +12,8 @@ pub enum Command {
     Quit,
     FileOpen(std::path::PathBuf),
 
-    EditorCommand(editor::Command),
+    Editor(EditorId, editor::EditorCommand),
+    Buffer(BufferId, editor::BufferCommand),
 }
 
 #[derive(Debug)]
@@ -92,22 +93,18 @@ impl App {
             };
 
             if let Some(command) = maybe_command.take() {
-                use Command::*;
-
                 match command {
-                    Quit => break 'main,
-                    EditorCommand(command) => match command {
-                        editor::Command::Editor(editor_id, cmd) => {
-                            let editor = &mut editors[editor_id];
-                            let buffer = &mut buffers[editor.buffer_id];
-                            editor.command(&buffer, cmd);
-                        }
-                        editor::Command::Buffer(buffer_id, cmd) => {
-                            let buffer = &mut buffers[buffer_id];
-                            buffer.command(cmd);
-                        }
-                    },
-                    FileOpen(path) => {
+                    Command::Quit => break 'main,
+                    Command::Editor(editor_id, cmd) => {
+                        let editor = &mut editors[editor_id];
+                        let buffer = &mut buffers[editor.buffer_id];
+                        editor.command(buffer, cmd);
+                    }
+                    Command::Buffer(buffer_id, cmd) => {
+                        let buffer = &mut buffers[buffer_id];
+                        buffer.command(cmd);
+                    }
+                    Command::FileOpen(path) => {
                         let contents = self.file_open(&path).await?;
                         let buffer_id =
                             buffers.insert_with_key(|k| Buffer::new(k, contents.clone()));
@@ -134,14 +131,14 @@ impl App {
 
     #[tracing::instrument(skip(self))]
     async fn file_open(&self, path: &std::path::PathBuf) -> Result<BufferContents> {
-        Buffer::read(&path).await
+        Buffer::read(path).await
     }
 
     fn process_syntax(&self, ev: syntax::Event) -> Option<Command> {
         match ev {
-            syntax::Event::Hightlight(buffer_id, hls) => Some(Command::EditorCommand(
-                editor::Command::Buffer(buffer_id, editor::BufferCommand::Highlight(hls)),
-            )),
+            syntax::Event::Hightlight(buffer_id, hls) => {
+                Some(Command::Buffer(buffer_id, editor::BufferCommand::Highlight(hls)))
+            }
             _ => None,
         }
     }
@@ -172,7 +169,11 @@ impl App {
                     }
                     _ => None,
                 };
-                command.or_else(|| editor.process_key(key, buffer).map(Command::EditorCommand))
+                command.or_else(|| {
+                    editor
+                        .process_key(key, buffer)
+                        .map(|cmd| Command::Editor(editor.id, cmd))
+                })
             }
         }
     }

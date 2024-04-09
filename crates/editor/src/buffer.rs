@@ -46,7 +46,7 @@ impl Buffer {
         Ok(Contents(lines))
     }
 
-    pub fn command(&mut self, command: Command) -> () {
+    pub fn command(&mut self, command: Command) {
         match command {
             Command::Highlight(hls) => self.highlights = hls,
         }

@@ -47,7 +47,7 @@ impl Editor {
         Self { id, buffer_id, mode: Default::default(), cursor: Default::default() }
     }
 
-    pub fn process_key(&mut self, key: KeyEvent, buffer: &Buffer) -> Option<crate::Command> {
+    pub fn process_key(&mut self, key: KeyEvent, buffer: &Buffer) -> Option<Command> {
         use crossterm::event::KeyCode;
         debug_assert!(buffer.id == self.buffer_id);
 
@@ -75,7 +75,7 @@ impl Editor {
         None
     }
 
-    pub fn command(&mut self, buffer: &Buffer, command: Command) -> () {
+    pub fn command(&mut self, buffer: &Buffer, command: Command) {
         debug_assert!(buffer.id == self.buffer_id);
         match command {
             Command::ModeSet(mode) => self.mode = mode,
@@ -92,22 +92,22 @@ impl Editor {
         };
     }
 
-    fn cursor_move_left(&mut self, _buffer: &Buffer) -> () {
+    fn cursor_move_left(&mut self, _buffer: &Buffer) {
         self.cursor = self.cursor.prev_column();
     }
 
-    fn cursor_move_up(&mut self, buffer: &Buffer) -> () {
+    fn cursor_move_up(&mut self, buffer: &Buffer) {
         self.cursor = self.cursor.prev_line();
         match buffer.contents.line_at(self.cursor.line) {
             None => (),
             Some(line) => {
-                let len = if line.len() > 0 { line.len() - 1 } else { 0 };
+                let len = if !line.is_empty() { line.len() - 1 } else { 0 };
                 self.cursor.column = std::cmp::min(len, self.cursor.column)
             }
         }
     }
 
-    fn cursor_move_right(&mut self, buffer: &Buffer) -> () {
+    fn cursor_move_right(&mut self, buffer: &Buffer) {
         let next_cursor = self.cursor.next_column();
         match buffer.contents.char_at(next_cursor) {
             None | Some(b'\n') => (),
@@ -115,19 +115,19 @@ impl Editor {
         }
     }
 
-    fn cursor_move_down(&mut self, buffer: &Buffer) -> () {
+    fn cursor_move_down(&mut self, buffer: &Buffer) {
         let next_cursor = self.cursor.next_line();
         match buffer.contents.line_at(next_cursor.line) {
             None => (),
             Some(line) => {
                 self.cursor = next_cursor;
-                let len = if line.len() > 0 { line.len() - 1 } else { 0 };
+                let len = if !line.is_empty() { line.len() - 1 } else { 0 };
                 self.cursor.column = std::cmp::min(len, self.cursor.column);
             }
         }
     }
 
-    fn cursor_jump_forward_word_end(&mut self, _buffer: &Buffer) -> () {
+    fn cursor_jump_forward_word_end(&mut self, _buffer: &Buffer) {
         // loop {
         //     match self.cursor.next() {
         //         None => break,
@@ -140,7 +140,7 @@ impl Editor {
         // }
     }
 
-    fn cursor_jump_forward_word_next(&mut self, _buffer: &Buffer) -> () {
+    fn cursor_jump_forward_word_next(&mut self, _buffer: &Buffer) {
         // self.cursor_jump_forward_word_end();
         // loop {
         //     match self.cursor.next() {

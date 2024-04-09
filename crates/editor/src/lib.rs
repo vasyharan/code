@@ -6,12 +6,6 @@ pub use buffer::{
 };
 pub use editor::{Command as EditorCommand, Editor, Id as EditorId};
 
-#[derive(Debug)]
-pub enum Command {
-    Editor(EditorId, EditorCommand),
-    Buffer(BufferId, BufferCommand),
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialOrd, PartialEq)]
 pub struct Point {
     pub line: usize,
@@ -25,7 +19,7 @@ impl Point {
 
     pub fn prev_column(&self) -> Self {
         if self.column == 0 {
-            self.clone()
+            *self
         } else {
             Self { line: self.line, column: self.column - 1 }
         }
@@ -37,7 +31,7 @@ impl Point {
 
     pub fn prev_line(&self) -> Self {
         if self.line == 0 {
-            self.clone()
+            *self
         } else {
             Self { line: self.line - 1, column: self.column }
         }

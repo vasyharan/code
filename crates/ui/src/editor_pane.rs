@@ -45,7 +45,7 @@ impl Widget for EditorPane<'_> {
         let x = dims.left();
         for y in dims.top()..dims.bottom() {
             if let Some((yoffset, line)) = lines.next() {
-                for (xoffset, c) in line.into_iter().enumerate() {
+                for (xoffset, c) in line.iter().enumerate() {
                     let x = x + (xoffset as u16); // FIXME: downcast here!
                     let cell = buf.get_mut(x, y);
                     // let char_range = byte_offset..(byte_offset + 1);
