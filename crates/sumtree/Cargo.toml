@@ -1,15 +1,12 @@
 [package]
-name = "ui"
+name = "sumtree"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [lib]
-name = "ui"
+name = "sumtree"
 doctest = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-tracing.workspace = true
-ratatui.workspace = true
-editor.workspace = true

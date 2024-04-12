@@ -1,16 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/toku",
     "crates/editor",
+    "crates/sumtree",
     "crates/syntax",
+    "crates/toku",
     "crates/ui",
 ]
 
 [workspace.dependencies]
-ui = { path = "./crates/ui" }
 editor = { path = "./crates/editor" }
+sumtree = { path = "./crates/sumtree" }
 syntax = { path = "./crates/syntax" }
+ui = { path = "./crates/ui" }
 
 anyhow = "1.0.75"
 crossterm = { version = "0.27.0", default-features = false, features = [
