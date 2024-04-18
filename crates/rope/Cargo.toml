@@ -1,23 +1,21 @@
 [package]
-name = "syntax"
+name = "rope"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [lib]
-name = "syntax"
+name = "rope"
 doctest = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-editor.workspace = true
-rope.workspace = true
+core.workspace = true
 
-anyhow.workspace = true
-futures.workspace = true
-iset.workspace = true
 tokio.workspace = true
-tracing.workspace = true
+sumtree.workspace = true
+anyhow.workspace = true
+bstr.workspace = true
 
-tree-sitter = "0.20"
-tree-sitter-rust = "0.20"
+bytecount = "0.6"
+memchr = "2.7"

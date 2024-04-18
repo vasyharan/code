@@ -1,7 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/core",
     "crates/editor",
+    "crates/rope",
     "crates/sumtree",
     "crates/syntax",
     "crates/toku",
@@ -9,12 +11,15 @@ members = [
 ]
 
 [workspace.dependencies]
+core = { path = "./crates/core" }
 editor = { path = "./crates/editor" }
+rope = { path = "./crates/rope" }
 sumtree = { path = "./crates/sumtree" }
 syntax = { path = "./crates/syntax" }
 ui = { path = "./crates/ui" }
 
 anyhow = "1.0.75"
+bstr = "1.7.0"
 crossterm = { version = "0.27.0", default-features = false, features = [
   "event-stream",
   "bracketed-paste",

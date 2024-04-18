@@ -1,13 +1,16 @@
-use std::fmt;
 use std::sync::Arc;
+use std::{fmt, ops::Deref};
 
-mod cursor;
+pub mod cursor;
 mod macros;
 
-use cursor::Cursor;
+pub use cursor::{Cursor, Direction as CursorDirection};
 
-pub trait Summary: Default + Clone + fmt::Debug {
-    fn combine(&self, other: &Self) -> Self;
+pub trait Summary: Default + Clone + Copy + fmt::Debug {
+    fn combine(&self, rhs: &Self) -> Self;
+
+    fn scan_leaf(&mut self, lhs: &Self);
+    fn scan_branch(&mut self, lhs: &Self);
 
     fn empty() -> Self {
         Default::default()
@@ -20,9 +23,8 @@ pub trait Item: Clone + fmt::Debug {
     fn summary(&self) -> Self::Summary;
 }
 
-#[cfg(test)]
 #[derive(Debug)]
-pub(crate) enum Error {
+pub enum Error {
     ConsecutiveRed,
     DifferingBlackHeight,
 }
@@ -30,34 +32,44 @@ pub(crate) enum Error {
 #[derive(Debug, Clone)]
 pub struct SumTree<T: Item>(Arc<Node<T>>);
 
+impl<T: Item> Deref for SumTree<T> {
+    type Target = Arc<Node<T>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl<T: Item> SumTree<T> {
-    fn new_leaf(item: T) -> Self {
+    pub fn new_leaf(item: T) -> Self {
         Self(Arc::new(Node::new_leaf(item)))
     }
 
-    fn new_branch(colour: Colour, left: SumTree<T>, right: SumTree<T>) -> Self {
+    pub fn new_branch(colour: Colour, left: SumTree<T>, right: SumTree<T>) -> Self {
         Self(Arc::new(Node::new_branch(colour, left, right)))
     }
 
-    // fn new_node(node: Node<T>) -> Self {
-    //     Self(Arc::new(node))
-    // }
+    pub fn deref_item(&self) -> &T {
+        self.0.deref_item()
+    }
 
-    fn summary(&self) -> &T::Summary {
+    pub fn summary(&self) -> T::Summary {
         self.0.summary()
     }
 
-    fn cursor<'a>(&'a self) -> Cursor<'a, T> {
+    pub fn cursor(&self) -> Cursor<'_, T> {
         Cursor::new(self)
     }
 
-    #[cfg(test)]
-    fn is_balanced(&self) -> bool {
+    pub fn cursor_with_summary(&self) -> Cursor<'_, T> {
+        Cursor::with_summary(self)
+    }
+
+    pub fn is_balanced(&self) -> bool {
         self.0.black_height().is_ok()
     }
 
-    #[cfg(test)]
-    fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
+    pub fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         writeln!(w, "digraph G {{")?;
         self.0.write_dot(w)?;
         writeln!(w, "}}")?;
@@ -87,7 +99,7 @@ pub enum Node<T: Item> {
 
 impl<T: Item> Node<T> {
     fn new_branch(colour: Colour, left: SumTree<T>, right: SumTree<T>) -> Self {
-        let summary = left.0.summary().combine(right.0.summary());
+        let summary = left.0.summary().combine(&right.0.summary());
         Node::Branch { colour, left, right, summary }
     }
 
@@ -96,17 +108,17 @@ impl<T: Item> Node<T> {
         Node::Leaf { item, summary }
     }
 
-    fn unwrap_item(&self) -> &T {
+    pub fn deref_item(&self) -> &T {
         match self {
-            Node::Branch { .. } => panic!("called `Node::unwrap_item()` on a `Branch` node"),
+            Node::Branch { .. } => unreachable!("called `Node::deref_item()` on a `Branch` node"),
             Node::Leaf { ref item, .. } => item,
         }
     }
 
-    fn summary(&self) -> &T::Summary {
+    fn summary(&self) -> T::Summary {
         match self {
-            Node::Branch { ref summary, .. } => summary,
-            Node::Leaf { ref summary, .. } => summary,
+            Node::Branch { summary, .. } => *summary,
+            Node::Leaf { summary, .. } => *summary,
         }
     }
 
@@ -117,7 +129,6 @@ impl<T: Item> Node<T> {
         }
     }
 
-    #[cfg(test)]
     fn black_height(&self) -> Result<usize, Error> {
         match self {
             Node::Leaf { .. } => Ok(0),
@@ -141,11 +152,14 @@ impl<T: Item> Node<T> {
         }
     }
 
-    #[cfg(test)]
     fn write_dot(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         match self {
-            Node::Branch { colour, left, right, .. } => {
-                writeln!(w, "\tn{:p}[shape=circle,color={},label=\"\"];", self, colour)?;
+            Node::Branch { colour, left, right, summary, .. } => {
+                writeln!(
+                    w,
+                    "\tn{:p}[shape=circle,color={},label=\"{:?}\"];",
+                    self, colour, summary
+                )?;
 
                 left.0.write_dot(w)?;
                 writeln!(w, "\tn{:p} -> n{:p};", self, left.0.as_ref())?;
@@ -162,7 +176,7 @@ impl<T: Item> Node<T> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Colour {
+pub enum Colour {
     Red,
     Black,
 }
@@ -198,42 +212,42 @@ mod tests {
 
         let tree = leaf!(V(5));
         assert!(tree.is_balanced());
-        assert_eq!(tree.summary(), &Sum(5));
+        assert_eq!(tree.summary(), Sum(5));
 
         let mut cursor = tree.cursor();
-        assert_eq!(cursor.next().map(|n| n.0.unwrap_item()), Some(&V(5)));
+        assert_eq!(cursor.next().map(|n| n.0.deref_item()), Some(&V(5)));
 
         let tree = cursor.into_position().insert_left(V(4));
         assert!(tree.is_balanced());
-        assert_eq!(tree.summary(), &Sum(9));
+        assert_eq!(tree.summary(), Sum(9));
 
         let mut cursor = tree.cursor();
-        assert_eq!(cursor.next().map(|n| n.0.unwrap_item()), Some(&V(4)));
-        assert_eq!(cursor.next().map(|n| n.0.unwrap_item()), Some(&V(5)));
+        assert_eq!(cursor.next().map(|n| n.0.deref_item()), Some(&V(4)));
+        assert_eq!(cursor.next().map(|n| n.0.deref_item()), Some(&V(5)));
 
         cursor.reset();
         let tree = cursor.into_position().insert_left(V(1));
         let mut file = std::fs::File::create("target/tests/insert01.dot").expect("create file");
         tree.write_dot(&mut file).expect("write dot file");
         assert!(tree.is_balanced());
-        assert_eq!(tree.summary(), &Sum(10));
+        assert_eq!(tree.summary(), Sum(10));
 
         let mut cursor = tree.cursor();
-        assert_eq!(cursor.next().map(|n| n.0.unwrap_item()), Some(&V(1)));
-        assert_eq!(cursor.next().map(|n| n.0.unwrap_item()), Some(&V(4)));
-        assert_eq!(cursor.next().map(|n| n.0.unwrap_item()), Some(&V(5)));
+        assert_eq!(cursor.next().map(|n| n.0.deref_item()), Some(&V(1)));
+        assert_eq!(cursor.next().map(|n| n.0.deref_item()), Some(&V(4)));
+        assert_eq!(cursor.next().map(|n| n.0.deref_item()), Some(&V(5)));
 
         let tree = cursor.into_position().insert_right(V(9));
         let mut file = std::fs::File::create("target/tests/insert09.dot").expect("create file");
         tree.write_dot(&mut file).expect("write dot file");
         assert!(tree.is_balanced());
-        assert_eq!(tree.summary(), &Sum(19));
+        assert_eq!(tree.summary(), Sum(19));
 
         let mut cursor = tree.cursor();
-        assert_eq!(cursor.next().map(|n| n.0.unwrap_item()), Some(&V(1)));
-        assert_eq!(cursor.next().map(|n| n.0.unwrap_item()), Some(&V(4)));
-        assert_eq!(cursor.next().map(|n| n.0.unwrap_item()), Some(&V(5)));
-        assert_eq!(cursor.next().map(|n| n.0.unwrap_item()), Some(&V(9)));
+        assert_eq!(cursor.next().map(|n| n.0.deref_item()), Some(&V(1)));
+        assert_eq!(cursor.next().map(|n| n.0.deref_item()), Some(&V(4)));
+        assert_eq!(cursor.next().map(|n| n.0.deref_item()), Some(&V(5)));
+        assert_eq!(cursor.next().map(|n| n.0.deref_item()), Some(&V(9)));
     }
 
     #[derive(Debug, Clone, PartialEq)]
@@ -251,8 +265,16 @@ mod tests {
     pub(crate) struct Sum(pub(crate) u32);
 
     impl Summary for Sum {
-        fn combine(&self, other: &Self) -> Self {
-            Sum(self.0 + other.0)
+        fn combine(&self, rhs: &Self) -> Self {
+            Sum(self.0 + rhs.0)
+        }
+
+        fn scan_branch(&mut self, lhs: &Self) {
+            self.0 += lhs.0;
+        }
+
+        fn scan_leaf(&mut self, lhs: &Self) {
+            self.0 += lhs.0;
         }
     }
 }

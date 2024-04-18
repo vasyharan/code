@@ -17,12 +17,7 @@ pub fn highlight(
     for (query_match, _) in captures {
         for capture in query_match.captures {
             let capture_name = &query.capture_names()[capture.index as usize];
-            // highlights.insert(capture.node.byte_range(), capture_name.clone());
-            let range = capture.node.range();
-            let start =
-                editor::Point { line: range.start_point.row, column: range.start_point.column };
-            let end = editor::Point { line: range.end_point.row, column: range.end_point.column };
-            highlights.insert(start..end, capture_name.clone());
+            highlights.insert(capture.node.byte_range(), capture_name.clone());
         }
     }
     highlights

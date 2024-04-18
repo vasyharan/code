@@ -1,6 +1,7 @@
-use crate::{Buffer, BufferId, Point};
+use crate::{Buffer, BufferId};
 use crossterm::event::KeyEvent;
 use slotmap::new_key_type;
+use core::Point;
 
 new_key_type! {
     pub struct Id;
@@ -98,7 +99,7 @@ impl Editor {
 
     fn cursor_move_up(&mut self, buffer: &Buffer) {
         self.cursor = self.cursor.prev_line();
-        match buffer.contents.line_at(self.cursor.line) {
+        match buffer.contents.line(self.cursor.line) {
             None => (),
             Some(line) => {
                 let len = if !line.is_empty() { line.len() - 1 } else { 0 };
@@ -110,14 +111,14 @@ impl Editor {
     fn cursor_move_right(&mut self, buffer: &Buffer) {
         let next_cursor = self.cursor.next_column();
         match buffer.contents.char_at(next_cursor) {
-            None | Some(b'\n') => (),
+            None | Some('\n') => (),
             _ => self.cursor = next_cursor,
         }
     }
 
     fn cursor_move_down(&mut self, buffer: &Buffer) {
         let next_cursor = self.cursor.next_line();
-        match buffer.contents.line_at(next_cursor.line) {
+        match buffer.contents.line(next_cursor.line) {
             None => (),
             Some(line) => {
                 self.cursor = next_cursor;

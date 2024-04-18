@@ -34,33 +34,41 @@ impl<'a> EditorPane<'a> {
 }
 
 impl Widget for EditorPane<'_> {
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(skip(self, buf))]
     fn render(self, dims: tui::Rect, buf: &mut tui::Buffer) {
+        use bstr::ByteSlice;
+
         let offset = self.screen_offset(dims);
         let mut lines = self
             .buffer
             .contents
-            .lines(offset.line..(offset.line + dims.height as usize))
-            .enumerate();
+            .lines(offset.line..(offset.line + dims.height as usize));
         let x = dims.left();
         for y in dims.top()..dims.bottom() {
-            if let Some((yoffset, line)) = lines.next() {
-                for (xoffset, c) in line.iter().enumerate() {
-                    let x = x + (xoffset as u16); // FIXME: downcast here!
-                    let cell = buf.get_mut(x, y);
-                    // let char_range = byte_offset..(byte_offset + 1);
-                    let start =
-                        editor::Point { line: yoffset + y as usize, column: xoffset + x as usize };
-                    let end = editor::Point {
-                        line: yoffset + y as usize,
-                        column: xoffset + 1 + x as usize,
-                    };
-                    if let Some((_, name)) = self.buffer.highlights.iter(start..end).next() {
-                        if let Some(color) = self.theme.colour(name) {
-                            cell.set_fg(color.0);
+            if let Some(line) = lines.next() {
+                let chunk_and_ranges = line.chunk_and_ranges(..);
+                let mut xoffset = 0;
+                'row_loop: for (chunk, chunk_range) in chunk_and_ranges {
+                    let mut byte_offset = chunk_range.start;
+                    for c in chunk.chars() {
+                        let x = x + xoffset;
+                        if x >= dims.width {
+                            break 'row_loop;
                         }
+                        let char_len = c.len_utf8();
+                        let char_range = byte_offset..(byte_offset + char_len);
+                        let cell = buf.get_mut(x, y);
+                        // cell.set_bg(self.theme.bg().0);
+                        if let Some((_, name)) = self.buffer.highlights.iter(char_range).next() {
+                            if let Some(color) = self.theme.colour(name) {
+                                cell.set_fg(color.0);
+                            }
+                        }
+                        cell.set_char(c);
+
+                        xoffset += 1; // TODO: this should check wcwidth
+                        byte_offset += char_len;
                     }
-                    cell.set_char(*c as char);
                 }
             } else {
                 buf.get_mut(x, y).set_char('~');

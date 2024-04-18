@@ -1,4 +1,4 @@
-use crate::{Colour, Item, Node, SumTree};
+use crate::{Colour, Item, Node, SumTree, Summary};
 
 #[derive(Debug)]
 pub enum Direction {
@@ -11,15 +11,29 @@ pub struct Cursor<'a, T: Item> {
     tree: &'a SumTree<T>,
     ancestors: Vec<&'a SumTree<T>>,
     curr: Option<&'a SumTree<T>>,
+    summary: Option<T::Summary>,
 }
 
 impl<'a, T: Item> Cursor<'a, T> {
     pub fn new(tree: &'a SumTree<T>) -> Self {
-        Self { tree, ancestors: vec![], curr: None }
+        Self { tree, ancestors: vec![], curr: None, summary: None }
+    }
+
+    pub fn with_summary(tree: &'a SumTree<T>) -> Self {
+        Self { tree, ancestors: vec![], curr: None, summary: Some(T::Summary::default()) }
+    }
+
+    pub fn curr(&self) -> Option<&'a SumTree<T>> {
+        self.curr
+    }
+
+    pub fn summary(&self) -> T::Summary {
+        self.summary
+            .expect("Cursor::summary() invoked on non-summarizing cursor")
     }
 
     pub fn into_position(mut self) -> CursorPosition<'a, T> {
-        if let None = self.curr {
+        if self.curr.is_none() {
             self.goto_leftmost_leaf_from(self.tree);
         }
         match self.curr {
@@ -31,6 +45,7 @@ impl<'a, T: Item> Cursor<'a, T> {
     pub fn reset(&mut self) {
         self.ancestors.clear();
         self.curr = None;
+        self.summary = self.summary.map(|_| T::Summary::default());
     }
 
     pub fn next(&mut self) -> Option<&'a SumTree<T>> {
@@ -42,7 +57,7 @@ impl<'a, T: Item> Cursor<'a, T> {
         &mut self,
         mut seek_fn: impl FnMut(&'a SumTree<T>) -> Direction,
     ) -> Option<&'a SumTree<T>> {
-        if let None = self.curr {
+        if self.curr.is_none() {
             self.curr = Some(self.tree);
         }
         while let Some(next) = self.curr {
@@ -68,6 +83,12 @@ impl<'a, T: Item> Cursor<'a, T> {
     }
 
     fn goto_next_right_node_from(&mut self, from: &'a SumTree<T>) {
+        if let Some(ref mut summary) = self.summary {
+            match from.0.as_ref() {
+                Node::Leaf { .. } => summary.scan_leaf(&from.summary()),
+                Node::Branch { .. } => summary.scan_branch(&from.summary()),
+            }
+        }
         match from.0.as_ref() {
             Node::Leaf { .. } => {
                 let mut search_node = Some(from);
@@ -121,6 +142,12 @@ impl<'a, T: Item> Cursor<'a, T> {
     }
 
     fn goto_next_leaf_from(&mut self, from: &'a SumTree<T>) {
+        if let Some(ref mut summary) = self.summary {
+            match from.0.as_ref() {
+                Node::Leaf { .. } => summary.scan_leaf(&from.summary()),
+                Node::Branch { .. } => summary.scan_branch(&from.summary()),
+            }
+        }
         let mut maybe_from = Some(from);
         while maybe_from.is_some() && !self.ancestors.is_empty() {
             let from = maybe_from.unwrap();
@@ -155,24 +182,27 @@ impl<'a, T: Item> CursorPosition<'a, T> {
     }
 
     pub fn insert_left(self, item: T) -> SumTree<T> {
-        let right = self.curr;
         let left = SumTree::new_leaf(item);
-        let tree = SumTree::new_branch(Colour::Red, left, right.clone());
-        self.balance(right, tree)
+        let tree = SumTree::new_branch(Colour::Red, left, self.curr.clone());
+        self.balance(tree)
     }
 
     pub fn insert_right(self, item: T) -> SumTree<T> {
-        let left = self.curr;
         let right = SumTree::new_leaf(item);
-        let tree = SumTree::new_branch(Colour::Red, left.clone(), right);
-        self.balance(left, tree)
+        let tree = SumTree::new_branch(Colour::Red, self.curr.clone(), right);
+        self.balance(tree)
     }
 
-    fn balance(mut self, old: &SumTree<T>, new: SumTree<T>) -> SumTree<T> {
-        let mut old = old;
+    pub fn replace(self, left: SumTree<T>, right: SumTree<T>) -> SumTree<T> {
+        let tree = SumTree::new_branch(Colour::Red, left.clone(), right);
+        self.balance(tree)
+    }
+
+    fn balance(mut self, new: SumTree<T>) -> SumTree<T> {
+        let mut old = self.curr;
         let mut new = new;
-        while !self.ancestors.is_empty() {
-            let parent = self.ancestors.pop().unwrap();
+        while let Some(parent) = self.ancestors.pop() {
+            
             match parent.0.as_ref() {
                 Node::Leaf { .. } => unreachable!("leaf node on ancestors stack"),
                 Node::Branch { colour, left, right, .. } => {
@@ -248,8 +278,6 @@ fn balance<T: Item>(colour: Colour, left: SumTree<T>, right: SumTree<T>) -> (Sum
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
     use super::*;
     use crate::macros::*;
     use crate::tests::*;
@@ -291,15 +319,23 @@ mod tests {
          *         1 2 3 4 5 6
          */
         {
-            let mut cursor = tree.cursor();
+            let mut cursor = tree.cursor_with_summary();
             assert_eq!(cursor.next(), Some(&v1));
+            assert_eq!(cursor.summary(), Sum(0));
             assert_eq!(cursor.next(), Some(&v2));
+            assert_eq!(cursor.summary(), Sum(1));
             assert_eq!(cursor.next(), Some(&v3));
+            assert_eq!(cursor.summary(), Sum(3));
             assert_eq!(cursor.next(), Some(&v4));
+            assert_eq!(cursor.summary(), Sum(6));
             assert_eq!(cursor.next(), Some(&v5));
+            assert_eq!(cursor.summary(), Sum(10));
             assert_eq!(cursor.next(), Some(&v6));
+            assert_eq!(cursor.summary(), Sum(15));
             assert_eq!(cursor.next(), Some(&v7));
+            assert_eq!(cursor.summary(), Sum(21));
             assert_eq!(cursor.next(), None);
+            assert_eq!(cursor.summary(), Sum(28));
         }
     }
 
@@ -335,7 +371,7 @@ mod tests {
                 (&b3, Direction::Right),
                 (&b6, Direction::Left),
             ];
-            let mut cursor = tree.cursor();
+            let mut cursor = tree.cursor_with_summary();
             assert_eq!(
                 cursor.seek(|node| {
                     let (expected, direction) = directions.pop().unwrap();
@@ -344,10 +380,11 @@ mod tests {
                 }),
                 Some(&v4)
             );
+            assert_eq!(cursor.summary(), Sum(17));
         }
         {
             let mut directions = vec![(&b5, Direction::Right), (&b6, Direction::Right)];
-            let mut cursor = tree.cursor();
+            let mut cursor = tree.cursor_with_summary();
             assert_eq!(
                 cursor.seek(|node| {
                     let (expected, direction) = directions.pop().unwrap();
@@ -356,6 +393,7 @@ mod tests {
                 }),
                 Some(&v7)
             );
+            assert_eq!(cursor.summary(), Sum(46));
         }
     }
 }

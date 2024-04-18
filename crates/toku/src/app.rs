@@ -1,8 +1,10 @@
 use anyhow::Result;
 use crossterm::event::Event;
-use editor::{Buffer, BufferContents, BufferId, Editor, EditorId};
 use slotmap::SlotMap;
 use tokio::sync::mpsc;
+
+use editor::{Buffer, BufferContents, BufferId, Editor, EditorId};
+use rope::SlabAllocator;
 
 type BufferMap = SlotMap<BufferId, Buffer>;
 type EditorMap = SlotMap<EditorId, Editor>;
@@ -53,6 +55,7 @@ impl App {
         let mut syntax = syntax::Client::spawn();
 
         let theme = ui::Theme::default();
+        let mut alloc = rope::SlabAllocator::new();
         let mut buffers = BufferMap::with_key();
         let mut editors = EditorMap::with_key();
         let mut editor_id: EditorId = editors.insert_with_key(|k| {
@@ -105,7 +108,7 @@ impl App {
                         buffer.command(cmd);
                     }
                     Command::FileOpen(path) => {
-                        let contents = self.file_open(&path).await?;
+                        let contents = self.file_open(&mut alloc, &path).await?;
                         let buffer_id =
                             buffers.insert_with_key(|k| Buffer::new(k, contents.clone()));
                         match syntax::Language::try_from(&buffers[buffer_id]) {
@@ -129,9 +132,13 @@ impl App {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn file_open(&self, path: &std::path::PathBuf) -> Result<BufferContents> {
-        Buffer::read(path).await
+    #[tracing::instrument(skip(self, alloc))]
+    async fn file_open(
+        &self,
+        alloc: &mut SlabAllocator,
+        path: &std::path::PathBuf,
+    ) -> Result<BufferContents> {
+        Buffer::read(alloc, path).await
     }
 
     fn process_syntax(&self, ev: syntax::Event) -> Option<Command> {

@@ -31,12 +31,10 @@
         };
       in {
       devShells.default = pkgs.mkShell {
-        buildInputs = [
-          rustToolchain
-        ];
         packages = with pkgs; [
+          rustToolchain
           cargo-watch
-        ];
+        ] ++ lib.optional pkgs.stdenv.isDarwin pkgs.libiconv;
         shellHook = ''
           export RUST_LOG="info"
           export RUST_BACKTRACE=1
