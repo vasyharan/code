@@ -1,3 +1,4 @@
+use bstr::ByteSlice;
 use std::ops::{Deref, DerefMut, Range};
 
 use sumtree::{CursorDirection, Item, Node, SumTree};
@@ -67,7 +68,7 @@ impl<'a> SlabCursor<'a> {
                     } else {
                         memchr::memchr_iter(b'\n', bytes)
                             .enumerate()
-                            .find(|(i, _)| *i == line-1)
+                            .find(|(i, _)| *i == line - 1)
                             .map(|(_, p)| p + 1)
                     }
                     .unwrap();
@@ -178,6 +179,55 @@ impl<'a> Iterator for Chunks<'a> {
     }
 }
 
+pub struct CharAndRanges<'a> {
+    chunks: ChunkAndRanges<'a>,
+    curr_chunk: Option<(&'a [u8], Range<usize>)>,
+    chars: Option<bstr::CharIndices<'a>>,
+}
+
+impl<'a> CharAndRanges<'a> {
+    pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
+        let mut chunks = ChunkAndRanges::new(rope, range);
+        let curr_chunk = chunks.next();
+        let chars = curr_chunk.as_ref().map(|(c, _)| c.char_indices());
+        Self { chunks, curr_chunk, chars }
+    }
+}
+
+impl<'a> Iterator for CharAndRanges<'a> {
+    type Item = (char, Range<usize>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match (self.curr_chunk.as_mut(), self.chars.as_mut()) {
+                (None, None) => break None,
+                (_, None) => self.curr_chunk = self.chunks.next(),
+                (_, Some(chars)) => {
+                    if let Some((start, end, c)) = chars.next() {
+                        break Some((c, start..end));
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub struct Chars<'a>(CharAndRanges<'a>);
+
+impl<'a> Chars<'a> {
+    pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
+        Self(CharAndRanges::new(rope, range))
+    }
+}
+
+impl<'a> Iterator for Chars<'a> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(chunk, _)| chunk)
+    }
+}
+
 pub struct Lines<'a> {
     rope: &'a Rope,
     cursor_pos: Option<CursorPosition<'a>>,
@@ -216,7 +266,8 @@ impl<'a> Iterator for Lines<'a> {
                     unreachable!("cursor position must be a leaf node")
                 };
 
-                let end_byte = cursor.summary().len + next_pos.as_ref().map(|p| p.offset).unwrap_or(0);
+                let end_byte =
+                    cursor.summary().len + next_pos.as_ref().map(|p| p.offset).unwrap_or(0);
                 self.cursor_pos = next_pos.map(|pos| CursorPosition(cursor, pos));
                 Some(RopeSlice::new(self.rope, start_byte..end_byte))
             }
@@ -225,7 +276,6 @@ impl<'a> Iterator for Lines<'a> {
 }
 
 fn trim_last_terminator(s: Option<&[u8]>) -> Option<&[u8]> {
-    use bstr::ByteSlice;
     match s {
         None => None,
         Some(mut s) => {

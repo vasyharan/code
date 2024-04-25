@@ -1,7 +1,7 @@
 use crate::{Buffer, BufferId};
+use core::Point;
 use crossterm::event::KeyEvent;
 use slotmap::new_key_type;
-use core::Point;
 
 new_key_type! {
     pub struct Id;
@@ -54,10 +54,10 @@ impl Editor {
 
         match self.mode {
             Mode::Normal => match key.code {
-                KeyCode::Up => self.cursor_move_up(buffer),
-                KeyCode::Down => self.cursor_move_down(buffer),
-                KeyCode::Left => self.cursor_move_left(buffer),
-                KeyCode::Right => self.cursor_move_right(buffer),
+                KeyCode::Up | KeyCode::Char('k') => self.cursor_move_up(buffer),
+                KeyCode::Down | KeyCode::Char('j') => self.cursor_move_down(buffer),
+                KeyCode::Left | KeyCode::Char('h') => self.cursor_move_left(buffer),
+                KeyCode::Right | KeyCode::Char('l') => self.cursor_move_right(buffer),
                 KeyCode::Char('w') => self.cursor_jump_forward_word_next(buffer),
                 KeyCode::Char('e') => self.cursor_jump_forward_word_end(buffer),
                 // KeyCode::Char('i') => Some(Command::ModeSet(Mode::Insert)),
@@ -91,67 +91,5 @@ impl Editor {
                 CursorJump::ForwardNextWord => self.cursor_jump_forward_word_next(buffer),
             },
         };
-    }
-
-    fn cursor_move_left(&mut self, _buffer: &Buffer) {
-        self.cursor = self.cursor.prev_column();
-    }
-
-    fn cursor_move_up(&mut self, buffer: &Buffer) {
-        self.cursor = self.cursor.prev_line();
-        match buffer.contents.line(self.cursor.line) {
-            None => (),
-            Some(line) => {
-                let len = if !line.is_empty() { line.len() - 1 } else { 0 };
-                self.cursor.column = std::cmp::min(len, self.cursor.column)
-            }
-        }
-    }
-
-    fn cursor_move_right(&mut self, buffer: &Buffer) {
-        let next_cursor = self.cursor.next_column();
-        match buffer.contents.char_at(next_cursor) {
-            None | Some('\n') => (),
-            _ => self.cursor = next_cursor,
-        }
-    }
-
-    fn cursor_move_down(&mut self, buffer: &Buffer) {
-        let next_cursor = self.cursor.next_line();
-        match buffer.contents.line(next_cursor.line) {
-            None => (),
-            Some(line) => {
-                self.cursor = next_cursor;
-                let len = if !line.is_empty() { line.len() - 1 } else { 0 };
-                self.cursor.column = std::cmp::min(len, self.cursor.column);
-            }
-        }
-    }
-
-    fn cursor_jump_forward_word_end(&mut self, _buffer: &Buffer) {
-        // loop {
-        //     match self.cursor.next() {
-        //         None => break,
-        //         Some(b' ') | Some(b'\n') => {
-        //             self.cursor.prev();
-        //             break;
-        //         }
-        //         _ => { /* continue */ }
-        //     }
-        // }
-    }
-
-    fn cursor_jump_forward_word_next(&mut self, _buffer: &Buffer) {
-        // self.cursor_jump_forward_word_end();
-        // loop {
-        //     match self.cursor.next() {
-        //         None => break,
-        //         Some(b' ') => { /* continue */ }
-        //         _ => {
-        //             self.cursor.prev();
-        //             break;
-        //         }
-        //     }
-        // }
     }
 }

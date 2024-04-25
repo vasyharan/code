@@ -1,5 +1,4 @@
 use core::Point;
-use cursor::Lines;
 use std::ops::{Range, RangeBounds};
 use sumtree::{Colour, SumTree};
 
@@ -16,7 +15,7 @@ mod util;
 use crate::error::{Error, Result};
 use crate::slab::Slab;
 
-pub use crate::cursor::{ChunkAndRanges, Chunks};
+pub use crate::cursor::{ChunkAndRanges, Chunks, Lines, CharAndRanges, Chars};
 pub use crate::slab::SlabAllocator;
 
 #[derive(Debug, Clone)]
@@ -39,6 +38,16 @@ impl Rope {
     pub fn lines(&self, range: impl RangeBounds<usize>) -> Lines {
         let range = util::bound_range(&range, 0..self.len_lines());
         Lines::new(self, range)
+    }
+
+    pub fn char_indices(&self, range: impl RangeBounds<usize>) -> CharAndRanges {
+        let range = util::bound_range(&range, 0..self.len());
+        CharAndRanges::new(self, range)
+    }
+
+    pub fn chars(&self, range: impl RangeBounds<usize>) -> Chars {
+        let range = util::bound_range(&range, 0..self.len());
+        Chars::new(self, range)
     }
 
     pub fn line(&self, line: usize) -> Option<RopeSlice<'_>> {
@@ -361,6 +370,12 @@ mod tests {
                 });
             assert_eq!(line, lines[i].as_bstr(), "line={}", i);
         }
+
+        let mut char_indicies = rope.char_indices(..);
+        for (start, end, c) in contents.char_indices() {
+            assert_eq!(char_indicies.next(), Some((c, start..end)));
+        }
+        assert_eq!(char_indicies.next(), None);
     }
 }
 

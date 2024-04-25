@@ -34,6 +34,8 @@
         packages = with pkgs; [
           rustToolchain
           cargo-watch
+          graphviz
+          imgcat
         ] ++ lib.optional pkgs.stdenv.isDarwin pkgs.libiconv;
         shellHook = ''
           export RUST_LOG="info"
