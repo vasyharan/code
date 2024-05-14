@@ -164,7 +164,7 @@ impl App {
             Event::FocusLost => todo!(),
             Event::Paste(_) => todo!(),
             Event::Mouse(_) => todo!(),
-            Event::Resize(_, _) => todo!(),
+            Event::Resize(_, _) => None,
             Event::Key(key) => {
                 let command = match key.code {
                     KeyCode::Char(c) => {
