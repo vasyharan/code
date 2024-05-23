@@ -202,7 +202,6 @@ impl<'a, T: Item> CursorPosition<'a, T> {
         let mut old = self.curr;
         let mut new = new;
         while let Some(parent) = self.ancestors.pop() {
-            
             match parent.0.as_ref() {
                 Node::Leaf { .. } => unreachable!("leaf node on ancestors stack"),
                 Node::Branch { colour, left, right, .. } => {

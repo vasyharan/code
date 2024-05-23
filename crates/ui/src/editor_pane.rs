@@ -16,7 +16,7 @@ impl<'a> EditorPane<'a> {
     }
 
     fn screen_offset(&self, dims: tui::Rect) -> editor::Point {
-        let cursor = self.editor.cursor;
+        let cursor = self.editor.cursor.clone();
         let width: usize = dims.width.into();
         let height: usize = dims.height.into();
         let column = if cursor.column >= width {
@@ -46,7 +46,7 @@ impl Widget for EditorPane<'_> {
         let x = dims.left();
         for y in dims.top()..dims.bottom() {
             if let Some(line) = lines.next() {
-                let chunk_and_ranges = line.chunk_and_ranges(..);
+                let chunk_and_ranges = line.chunk_and_ranges(0);
                 let mut xoffset = 0;
                 'row_loop: for (chunk, chunk_range) in chunk_and_ranges {
                     let mut byte_offset = chunk_range.start;

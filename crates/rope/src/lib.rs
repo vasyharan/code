@@ -1,21 +1,20 @@
 use core::Point;
 use std::ops::{Range, RangeBounds};
-use sumtree::{Colour, SumTree};
+use sumtree::{Colour, Node, SumTree};
 
 #[cfg(test)]
 use bstr::{BString, ByteVec};
-#[cfg(test)]
-use sumtree::Node;
 
 mod cursor;
 mod error;
 mod slab;
 mod util;
 
+use crate::cursor::{CursorPosition, SlabCursor};
 use crate::error::{Error, Result};
 use crate::slab::Slab;
 
-pub use crate::cursor::{ChunkAndRanges, Chunks, Lines, CharAndRanges, Chars};
+pub use crate::cursor::{CharAndRanges, Chars, ChunkAndRanges, Chunks, Lines};
 pub use crate::slab::SlabAllocator;
 
 #[derive(Debug, Clone)]
@@ -30,24 +29,62 @@ impl Rope {
         Self(None)
     }
 
-    pub fn chunks(&self, range: impl RangeBounds<usize>) -> Chunks {
-        let range = util::bound_range(&range, 0..self.len());
-        Chunks::new(self, range)
+    pub fn point_to_offset(&self, p: Point) -> Option<usize> {
+        match self.line(p.line) {
+            None => None,
+            Some(line) => {
+                if p.column < line.range.len() {
+                    Some(line.range.start + p.column)
+                } else {
+                    None
+                }
+            }
+        }
     }
 
-    pub fn lines(&self, range: impl RangeBounds<usize>) -> Lines {
-        let range = util::bound_range(&range, 0..self.len_lines());
-        Lines::new(self, range)
+    pub fn offset_to_point(&self, offset: usize) -> Option<Point> {
+        self.0.as_ref().and_then(|tree| {
+            let mut cursor = SlabCursor(tree.cursor_with_summary());
+            let pos = cursor.seek_to_byte(offset);
+            pos.map(|pos| match pos.leaf.as_ref() {
+                Node::Branch { .. } => unreachable!("sumtree seek must return leaf node"),
+                Node::Leaf { item, .. } => {
+                    let summary = cursor.summary();
+                    let (line_offset, column_offset) = item.as_bytes()[..pos.offset]
+                        .into_iter()
+                        .fold((0, 0), |(ls, cs), b| {
+                            if *b == b'\n' {
+                                (ls + 1, 0)
+                            } else {
+                                (ls, cs + 1)
+                            }
+                        });
+                    let line = summary.stats.lines.line + line_offset;
+                    let column = summary.stats.lines.column + column_offset;
+                    Point { line, column }
+                }
+            })
+        })
     }
 
-    pub fn char_indices(&self, range: impl RangeBounds<usize>) -> CharAndRanges {
+    pub fn chunks(&self, range: impl RangeBounds<usize>, offset: usize) -> Chunks {
         let range = util::bound_range(&range, 0..self.len());
-        CharAndRanges::new(self, range)
+        Chunks::new(self, range, offset)
     }
 
-    pub fn chars(&self, range: impl RangeBounds<usize>) -> Chars {
+    pub fn char_indices(&self, range: impl RangeBounds<usize>, offset: usize) -> CharAndRanges {
         let range = util::bound_range(&range, 0..self.len());
-        Chars::new(self, range)
+        CharAndRanges::new(self, range, offset)
+    }
+
+    pub fn chars(&self, range: impl RangeBounds<usize>, offset: usize) -> Chars {
+        let range = util::bound_range(&range, 0..self.len());
+        Chars::new(self, range, offset)
+    }
+
+    pub fn lines(&self, lines: impl RangeBounds<usize>) -> Lines {
+        let lines = util::bound_range(&lines, 0..self.len_lines());
+        Lines::new(self, lines)
     }
 
     pub fn line(&self, line: usize) -> Option<RopeSlice<'_>> {
@@ -55,12 +92,17 @@ impl Rope {
         Lines::new(self, range).next()
     }
 
+    pub fn slice(&self, range: impl RangeBounds<usize>) -> RopeSlice<'_> {
+        let range = util::bound_range(&range, 0..self.len());
+        RopeSlice { rope: self, range, trim_last_terminator: false }
+    }
+
     pub fn char_at(&self, point: Point) -> Option<char> {
         use bstr::ByteSlice;
 
         self.line(point.line).and_then(|line| {
             let mut column = point.column;
-            for chunk in line.chunks(..) {
+            for chunk in line.chunks(0) {
                 for c in chunk.chars() {
                     if column == 0 {
                         return Some(c);
@@ -87,10 +129,11 @@ impl Rope {
                 let leaf = cursor
                     .seek(|node| {
                         let summary = node.summary();
-                        if offset < summary.len_left {
+                        let left = summary.left.unwrap_or(Stats::default());
+                        if offset < left.len {
                             sumtree::cursor::Direction::Left
-                        } else if offset >= summary.len_left {
-                            offset -= summary.len_left;
+                        } else if offset >= left.len {
+                            offset -= left.len;
                             sumtree::cursor::Direction::Right
                         } else {
                             unreachable!()
@@ -102,7 +145,7 @@ impl Rope {
                 let slab = leaf.deref_item();
                 let tree = if offset == 0 {
                     pos.insert_left(text)
-                } else if offset == summary.len {
+                } else if offset == summary.stats.len {
                     pos.insert_right(text)
                 } else {
                     let left = SumTree::new_leaf(slab.substr(..offset));
@@ -122,16 +165,17 @@ impl Rope {
     pub fn len(&self) -> usize {
         match &self.0 {
             None => 0,
-            Some(tree) => tree.summary().len,
+            Some(tree) => tree.summary().stats.len,
         }
     }
 
     pub fn len_lines(&self) -> usize {
         match &self.0 {
             None => 0,
-            Some(tree) => tree.summary().len_lines,
+            Some(tree) => tree.summary().stats.lines.line,
         }
     }
+
     #[cfg(test)]
     pub(crate) fn to_bstring(&self) -> BString {
         match &self.0 {
@@ -167,11 +211,16 @@ impl Rope {
 pub struct RopeSlice<'a> {
     rope: &'a Rope,
     range: Range<usize>,
+    trim_last_terminator: bool,
 }
 
 impl<'a> RopeSlice<'a> {
     pub fn new(rope: &'a Rope, range: Range<usize>) -> Self {
-        Self { rope, range }
+        Self { rope, range, trim_last_terminator: false }
+    }
+
+    pub fn new_trim_last_terminator(rope: &'a Rope, range: Range<usize>) -> Self {
+        Self { rope, range, trim_last_terminator: true }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -182,29 +231,48 @@ impl<'a> RopeSlice<'a> {
         self.range.len()
     }
 
-    pub fn chunk_and_ranges(&self, range: impl RangeBounds<usize>) -> ChunkAndRanges {
-        let range = util::bound_range(&range, self.range.clone());
-        ChunkAndRanges::new_trim_last_terminator(self.rope, range)
+    pub fn chunk_and_ranges(&self, offset: usize) -> ChunkAndRanges {
+        if self.trim_last_terminator {
+            ChunkAndRanges::new_trim_last_terminator(self.rope, self.range.clone(), offset)
+        } else {
+            ChunkAndRanges::new(self.rope, self.range.clone(), offset)
+        }
     }
 
-    pub fn chunks(&self, range: impl RangeBounds<usize>) -> Chunks {
-        let range = util::bound_range(&range, self.range.clone());
-        Chunks::new_trim_last_terminator(self.rope, range)
+    pub fn chunks(&self, offset: usize) -> Chunks {
+        if self.trim_last_terminator {
+            Chunks::new_trim_last_terminator(self.rope, self.range.clone(), offset)
+        } else {
+            Chunks::new(self.rope, self.range.clone(), offset)
+        }
     }
+}
+#[derive(Default, Clone, Copy)]
+pub struct Stats {
+    pub len: usize,
+    pub lines: Point,
+    pub len_first_line: usize,
+    pub len_last_line: usize,
 }
 
 #[derive(Default, Clone, Copy)]
 pub struct Metrics {
-    pub len: usize,
-    pub len_lines: usize,
-    pub len_left: usize,
-    pub len_left_lines: usize,
+    pub stats: Stats,
+    pub left: Option<Stats>,
 }
 
 impl std::fmt::Debug for Metrics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // f.debug_struct("Metrics").field("len", &self.len).field("len_left", &self.len_left).field("len_lines", &self.len_lines).finish()
-        write!(f, "({}/{})", self.len, self.len_lines)
+        let stats = self.stats;
+        write!(
+            f,
+            "({},{}/{},{}/{})",
+            stats.len,
+            stats.lines.line,
+            stats.lines.column,
+            stats.len_first_line,
+            stats.len_last_line,
+        )
     }
 }
 
@@ -213,34 +281,76 @@ impl sumtree::Item for Slab {
 
     fn summary(&self) -> Self::Summary {
         let bs = self.as_bytes();
-        let num_lines = bytecount::count(bs, b'\n');
-        Metrics { len: bs.len(), len_lines: num_lines, len_left: 0, len_left_lines: 0 }
+        let len = bs.len();
+        let (len_lines, len_last_line) =
+            bs.into_iter()
+                .fold((vec![], 0 as usize), |(counts, last_count), ch| {
+                    if *ch == b'\n' {
+                        ([counts, [last_count].to_vec()].concat(), 0)
+                    } else {
+                        (counts, last_count + 1)
+                    }
+                });
+        let len_first_line = *len_lines.get(0).unwrap_or(&0);
+        let lines = Point { line: len_lines.len(), column: len_last_line };
+        let stats = Stats { len, lines, len_first_line, len_last_line };
+        Metrics { stats, left: None }
     }
 }
 
 impl sumtree::Summary for Metrics {
     fn combine(&self, rhs: &Self) -> Self {
-        let len = self.len + rhs.len;
-        let len_lines = self.len_lines + rhs.len_lines;
-        let len_left = self.len;
-        let len_left_lines = self.len_lines;
-        Metrics { len, len_lines, len_left, len_left_lines }
+        let len = self.stats.len + rhs.stats.len;
+        let (len_first_line, lines, len_last_line) = if rhs.stats.lines.line == 0 {
+            let line = self.stats.lines.line;
+            let column = self.stats.lines.column + rhs.stats.lines.column;
+            let lines = Point { line, column };
+            let len_first_line = self.stats.len_first_line;
+            let len_last_line = self.stats.len_last_line + rhs.stats.len_last_line;
+            (len_first_line, lines, len_last_line)
+        } else {
+            let line = self.stats.lines.line + rhs.stats.lines.line;
+            let column = rhs.stats.lines.column;
+            let lines = Point { line, column };
+            let len_first_line = self.stats.len_last_line + rhs.stats.len_first_line;
+            let len_last_line = rhs.stats.len_last_line;
+            (len_first_line, lines, len_last_line)
+        };
+        let stats = Stats { len, lines, len_first_line, len_last_line };
+        Metrics { stats, left: Some(self.stats) }
     }
 
-    fn scan_branch(&mut self, lhs: &Self) {
-        self.len += lhs.len_left;
-        self.len_lines += lhs.len_left_lines;
+    fn scan_branch(&mut self, from: &Self) {
+        let left = from.left.expect("branch must have left stats");
+        self.stats.len += left.len;
+        if left.lines.line == 0 {
+            self.stats.lines.column += left.lines.column;
+            self.stats.len_first_line += left.len_first_line;
+            self.stats.len_last_line += left.len_last_line;
+        } else {
+            self.stats.lines.line += left.lines.line;
+            self.stats.lines.column = left.len_last_line;
+            self.stats.len_first_line += left.len_first_line;
+        };
     }
 
-    fn scan_leaf(&mut self, lhs: &Self) {
-        self.len += lhs.len;
-        self.len_lines += lhs.len_lines;
+    fn scan_leaf(&mut self, from: &Self) {
+        let left = from.stats;
+        self.stats.len += left.len;
+        if left.lines.line == 0 {
+            self.stats.lines.column += left.lines.column;
+            self.stats.len_first_line += left.len_first_line;
+            self.stats.len_last_line += left.len_last_line;
+        } else {
+            self.stats.lines.line += left.lines.line;
+            self.stats.lines.column = left.len_last_line;
+            self.stats.len_first_line += left.len_first_line;
+        };
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bstr::BString;
     use bstr::ByteSlice;
 
     use super::*;
@@ -320,6 +430,22 @@ mod tests {
             assert_eq!(offset, *expected, "line num={}", line_num)
         }
 
+        for (linenum, (line, offset)) in lines.iter().zip(line_offsets.iter()).enumerate() {
+            for (start, end, _) in line.char_indices() {
+                let point = Point { line: linenum, column: start };
+                let actual = rope.point_to_offset(point.clone());
+                assert_eq!(actual, Some(offset + start), "{:?}", point);
+
+                let actual = rope.offset_to_point(offset + start);
+                assert_eq!(actual, Some(point.clone()), "{:?}", point);
+
+                for column in (start + 1)..end {
+                    let actual = rope.point_to_offset(Point { line: linenum, column });
+                    assert_eq!(actual, None);
+                }
+            }
+        }
+
         // let mut line_number = 0;
         // let mut line_start = 0;
         // let mut line_offsets = line_offsets.iter();
@@ -348,15 +474,15 @@ mod tests {
             "not ", "knowing ", "what", " it", " was;\n",
             "and ", "they", " ", "continue", " singing", " ", "i", "t", " ", "forever", " j", "us", "t ", "because...", "\n",
         ];
-        for (i, actual) in rope.chunks(..).enumerate() {
+        for (i, actual) in rope.chunks(.., 0).enumerate() {
             let expected = parts.get(i).unwrap_or(&"");
             assert_eq!(actual.as_bstr(), expected, "part={}", i);
         }
-        for (i, actual) in rope.chunks(11..).enumerate() {
+        for (i, actual) in rope.chunks(11.., 0).enumerate() {
             let expected = parts.get(i + 3).unwrap_or(&"");
             assert_eq!(actual.as_bstr(), expected, "part={}", i);
         }
-        for (i, actual) in rope.chunks(..172).enumerate() {
+        for (i, actual) in rope.chunks(..172, 0).enumerate() {
             let expected = parts.get(i).unwrap_or(&"");
             assert_eq!(actual.as_bstr(), expected, "part={}", i);
         }
@@ -364,14 +490,14 @@ mod tests {
         assert_eq!(rope.len_lines(), 5);
         for (i, line) in rope.lines(..).enumerate() {
             let line = line
-                .chunks(..)
+                .chunks(0)
                 .fold(BString::new(Vec::with_capacity(64)), |s, part| {
                     [s, part.as_bstr().into()].concat().into()
                 });
             assert_eq!(line, lines[i].as_bstr(), "line={}", i);
         }
 
-        let mut char_indicies = rope.char_indices(..);
+        let mut char_indicies = rope.char_indices(.., 0);
         for (start, end, c) in contents.char_indices() {
             assert_eq!(char_indicies.next(), Some((c, start..end)));
         }

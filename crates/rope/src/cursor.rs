@@ -3,16 +3,16 @@ use std::ops::{Deref, DerefMut, Range};
 
 use sumtree::{CursorDirection, Item, Node, SumTree};
 
-use crate::{Rope, RopeSlice, Slab};
+use crate::{Rope, RopeSlice, Slab, Stats};
 
-struct CursorPosition<'a>(SlabCursor<'a>, Position<'a, Slab>);
+pub(crate) struct CursorPosition<'a>(pub SlabCursor<'a>, pub Position<'a, Slab>);
 
-struct Position<'a, T: sumtree::Item> {
-    leaf: &'a SumTree<T>,
-    offset: usize,
+pub(crate) struct Position<'a, T: sumtree::Item> {
+    pub(crate) leaf: &'a SumTree<T>,
+    pub(crate) offset: usize,
 }
 
-struct SlabCursor<'a>(sumtree::Cursor<'a, Slab>);
+pub(crate) struct SlabCursor<'a>(pub sumtree::Cursor<'a, Slab>);
 
 impl<'a> Deref for SlabCursor<'a> {
     type Target = sumtree::Cursor<'a, Slab>;
@@ -29,14 +29,15 @@ impl<'a> DerefMut for SlabCursor<'a> {
 }
 
 impl<'a> SlabCursor<'a> {
-    fn seek_to_byte(&mut self, offset: usize) -> Option<Position<'a, Slab>> {
+    pub(crate) fn seek_to_byte(&mut self, offset: usize) -> Option<Position<'a, Slab>> {
         let mut offset = offset;
         let leaf = self.0.seek(|node| {
             let summary = node.summary();
-            if offset < summary.len_left {
+            let left = summary.left.unwrap_or(Stats::default());
+            if offset < left.len {
                 CursorDirection::Left
             } else {
-                offset -= summary.len_left;
+                offset -= left.len;
                 CursorDirection::Right
             }
         });
@@ -44,22 +45,23 @@ impl<'a> SlabCursor<'a> {
         leaf.map(|leaf| Position { leaf, offset })
     }
 
-    fn seek_to_line(&mut self, line: usize) -> Option<Position<'a, Slab>> {
+    pub(crate) fn seek_to_line(&mut self, line: usize) -> Option<Position<'a, Slab>> {
         self.0.reset();
         let mut line = line;
         let leaf = self.0.seek(|node| {
             let summary = node.summary();
-            if line <= summary.len_left_lines {
+            let left = summary.left.unwrap_or(Stats::default());
+            if line <= left.lines.line {
                 CursorDirection::Left
             } else {
-                line -= summary.len_left_lines;
+                line -= left.lines.line;
                 CursorDirection::Right
             }
         });
         leaf.and_then(|leaf| match leaf.as_ref() {
             Node::Branch { .. } => unreachable!("sumtree seek must return leaf node"),
             Node::Leaf { item, summary, .. } => {
-                if line <= summary.len_lines {
+                if line <= summary.stats.lines.line {
                     let bytes = item.as_bytes();
                     let offset = if line == 0 {
                         Some(0) // memchr::memchr(b'\n', bytes)
@@ -87,29 +89,34 @@ impl<'a> SlabCursor<'a> {
 
 pub struct ChunkAndRanges<'a> {
     range: Range<usize>,
+    offset: usize,
     cursor_pos: Option<CursorPosition<'a>>,
     trim_last_terminator: bool,
 }
 
 impl<'a> ChunkAndRanges<'a> {
-    pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
+    pub(super) fn new(rope: &'a Rope, range: Range<usize>, offset: usize) -> Self {
         let cursor_pos = rope.0.as_ref().and_then(|tree| {
             let mut cursor = SlabCursor(tree.cursor());
             cursor
-                .seek_to_byte(range.start)
+                .seek_to_byte(range.start + offset)
                 .map(|pos| CursorPosition(cursor, pos))
         });
-        Self { range, cursor_pos, trim_last_terminator: false }
+        Self { range, offset, cursor_pos, trim_last_terminator: false }
     }
 
-    pub(super) fn new_trim_last_terminator(rope: &'a Rope, range: Range<usize>) -> Self {
+    pub(super) fn new_trim_last_terminator(
+        rope: &'a Rope,
+        range: Range<usize>,
+        offset: usize,
+    ) -> Self {
         let cursor_pos = rope.0.as_ref().and_then(|tree| {
             let mut cursor = SlabCursor(tree.cursor());
             cursor
-                .seek_to_byte(range.start)
+                .seek_to_byte(range.start + offset)
                 .map(|pos| CursorPosition(cursor, pos))
         });
-        Self { range, cursor_pos, trim_last_terminator: true }
+        Self { range, offset, cursor_pos, trim_last_terminator: true }
     }
 }
 
@@ -117,7 +124,8 @@ impl<'a> Iterator for ChunkAndRanges<'a> {
     type Item = (&'a [u8], Range<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.range.is_empty() {
+        if self.offset >= self.range.len() {
+            // if self.range.is_empty() {
             return None;
         }
 
@@ -129,23 +137,24 @@ impl<'a> Iterator for ChunkAndRanges<'a> {
                     let chunk = if bytes.len() < self.range.len() {
                         Some(bytes)
                     } else {
-                        let chunk = Some(&bytes[..(self.range.len())]);
-                        if self.trim_last_terminator {
-                            trim_last_terminator(chunk)
-                        } else {
-                            chunk
-                        }
+                        Some(&bytes[..(self.range.len())])
+                    };
+
+                    let chunk = if self.trim_last_terminator {
+                        trim_last_terminator(chunk)
+                    } else {
+                        chunk
                     };
 
                     if let Some(chunk) = chunk {
-                        let chunk_range = self.range.start..(self.range.start + chunk.len());
+                        let chunk_range = (self.range.start + self.offset)
+                            ..(self.range.start + self.offset + chunk.len());
                         self.cursor_pos = cursor
+                            .0
                             .next()
                             .map(|leaf| Position { leaf, offset: 0 })
                             .map(|p| CursorPosition(cursor, p));
-
-                        self.range = (self.range.start + slab.summary().len - curr_pos.offset)
-                            ..self.range.end;
+                        self.offset += slab.summary().stats.len - curr_pos.offset;
 
                         Some((chunk, chunk_range))
                     } else {
@@ -162,12 +171,16 @@ impl<'a> Iterator for ChunkAndRanges<'a> {
 pub struct Chunks<'a>(ChunkAndRanges<'a>);
 
 impl<'a> Chunks<'a> {
-    pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
-        Self(ChunkAndRanges::new(rope, range))
+    pub(super) fn new(rope: &'a Rope, range: Range<usize>, offset: usize) -> Self {
+        Self(ChunkAndRanges::new(rope, range, offset))
     }
 
-    pub(super) fn new_trim_last_terminator(rope: &'a Rope, range: Range<usize>) -> Self {
-        Self(ChunkAndRanges::new_trim_last_terminator(rope, range))
+    pub(super) fn new_trim_last_terminator(
+        rope: &'a Rope,
+        range: Range<usize>,
+        offset: usize,
+    ) -> Self {
+        Self(ChunkAndRanges::new_trim_last_terminator(rope, range, offset))
     }
 }
 
@@ -181,16 +194,29 @@ impl<'a> Iterator for Chunks<'a> {
 
 pub struct CharAndRanges<'a> {
     chunks: ChunkAndRanges<'a>,
-    curr_chunk: Option<(&'a [u8], Range<usize>)>,
-    chars: Option<bstr::CharIndices<'a>>,
+    curr: Option<((&'a [u8], Range<usize>), bstr::CharIndices<'a>, usize)>,
 }
 
 impl<'a> CharAndRanges<'a> {
-    pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
-        let mut chunks = ChunkAndRanges::new(rope, range);
-        let curr_chunk = chunks.next();
-        let chars = curr_chunk.as_ref().map(|(c, _)| c.char_indices());
-        Self { chunks, curr_chunk, chars }
+    pub(super) fn new(rope: &'a Rope, range: Range<usize>, offset: usize) -> Self {
+        let mut chunks = ChunkAndRanges::new(rope, range, offset);
+        let curr = Self::chunks_next(&mut chunks);
+        Self { chunks, curr }
+    }
+
+    fn chunks_next<'b>(
+        chunks: &mut ChunkAndRanges<'b>,
+    ) -> Option<((&'b [u8], Range<usize>), bstr::CharIndices<'b>, usize)> {
+        chunks
+            .next()
+            .map(|(chunk, range)| ((chunk, range), chunk.char_indices(), 0))
+    }
+
+    pub fn offset(&self) -> usize {
+        self.curr
+            .as_ref()
+            .map(|((_, range), _, offset)| range.start + offset)
+            .unwrap_or(self.chunks.offset)
     }
 }
 
@@ -199,14 +225,16 @@ impl<'a> Iterator for CharAndRanges<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match (self.curr_chunk.as_mut(), self.chars.as_mut()) {
-                (None, None) => break None,
-                (_, None) => self.curr_chunk = self.chunks.next(),
-                (_, Some(chars)) => {
-                    if let Some((start, end, c)) = chars.next() {
-                        break Some((c, start..end));
+            match self.curr.as_mut() {
+                None => break None,
+                Some(((_, r), chars, ref mut offset)) => match chars.next() {
+                    None => self.curr = CharAndRanges::chunks_next(&mut self.chunks),
+                    Some((start, end, c)) => {
+                        let range = (r.start + start)..(r.start + end);
+                        *offset += range.len();
+                        break Some((c, range));
                     }
-                }
+                },
             }
         }
     }
@@ -215,8 +243,12 @@ impl<'a> Iterator for CharAndRanges<'a> {
 pub struct Chars<'a>(CharAndRanges<'a>);
 
 impl<'a> Chars<'a> {
-    pub(super) fn new(rope: &'a Rope, range: Range<usize>) -> Self {
-        Self(CharAndRanges::new(rope, range))
+    pub(super) fn new(rope: &'a Rope, range: Range<usize>, offset: usize) -> Self {
+        Self(CharAndRanges::new(rope, range, offset))
+    }
+
+    pub fn offset(&self) -> usize {
+        self.0.offset()
     }
 }
 
@@ -232,7 +264,6 @@ pub struct Lines<'a> {
     rope: &'a Rope,
     cursor_pos: Option<CursorPosition<'a>>,
     line_range: Range<usize>,
-    trim_last_terminator: bool,
 }
 
 impl<'a> Lines<'a> {
@@ -243,7 +274,7 @@ impl<'a> Lines<'a> {
                 .seek_to_line(line_range.start)
                 .map(|pos| CursorPosition(cursor, pos))
         });
-        Self { rope, cursor_pos, line_range, trim_last_terminator: false }
+        Self { rope, cursor_pos, line_range }
     }
 }
 
@@ -259,7 +290,7 @@ impl<'a> Iterator for Lines<'a> {
             Some(CursorPosition(mut cursor, curr_pos)) => {
                 self.line_range = (self.line_range.start + 1)..self.line_range.end;
 
-                let start_byte = cursor.summary().len + curr_pos.offset;
+                let start_byte = cursor.summary().stats.len + curr_pos.offset;
                 let next_pos = if let Node::Leaf { .. } = curr_pos.leaf.as_ref() {
                     cursor.seek_to_line(self.line_range.start)
                 } else {
@@ -267,9 +298,9 @@ impl<'a> Iterator for Lines<'a> {
                 };
 
                 let end_byte =
-                    cursor.summary().len + next_pos.as_ref().map(|p| p.offset).unwrap_or(0);
+                    cursor.summary().stats.len + next_pos.as_ref().map(|p| p.offset).unwrap_or(0);
                 self.cursor_pos = next_pos.map(|pos| CursorPosition(cursor, pos));
-                Some(RopeSlice::new(self.rope, start_byte..end_byte))
+                Some(RopeSlice::new_trim_last_terminator(self.rope, start_byte..end_byte))
             }
         }
     }

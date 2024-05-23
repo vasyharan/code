@@ -71,7 +71,7 @@ impl App {
                 let pane = ui::EditorPane::new(&theme, buffer, editor);
                 frame.render_widget(pane, area);
 
-                let cursor = editor.cursor;
+                let cursor = editor.cursor.clone();
                 frame.set_cursor(cursor.column as u16, cursor.line as u16);
             })?;
 
