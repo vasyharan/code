@@ -1,9 +1,10 @@
 use bstr::ByteSlice;
+use circular_buffer::CircularBuffer;
 use std::ops::{Deref, DerefMut, Range};
 
 use sumtree::{CursorDirection, Item, Node, SumTree};
 
-use crate::{Rope, RopeSlice, Slab, Stats};
+use crate::{Rope, RopeSlice, Slab};
 
 pub(crate) struct CursorPosition<'a>(pub SlabCursor<'a>, pub Position<'a, Slab>);
 
@@ -33,7 +34,7 @@ impl<'a> SlabCursor<'a> {
         let mut offset = offset;
         let leaf = self.0.seek(|node| {
             let summary = node.summary();
-            let left = summary.left.unwrap_or(Stats::default());
+            let left = summary.left.unwrap_or_default();
             if offset < left.len {
                 CursorDirection::Left
             } else {
@@ -50,7 +51,7 @@ impl<'a> SlabCursor<'a> {
         let mut line = line;
         let leaf = self.0.seek(|node| {
             let summary = node.summary();
-            let left = summary.left.unwrap_or(Stats::default());
+            let left = summary.left.unwrap_or_default();
             if line <= left.lines.line {
                 CursorDirection::Left
             } else {
@@ -192,63 +193,148 @@ impl<'a> Iterator for Chunks<'a> {
     }
 }
 
-pub struct CharAndRanges<'a> {
-    chunks: ChunkAndRanges<'a>,
-    curr: Option<((&'a [u8], Range<usize>), bstr::CharIndices<'a>, usize)>,
+enum CharRangeBufferState {
+    Buffering,
+    Replaying { offset: usize },
 }
 
-impl<'a> CharAndRanges<'a> {
+struct CharRangeState<'a> {
+    chunk: &'a [u8],
+    chunk_range: Range<usize>,
+    chars: bstr::CharIndices<'a>,
+    chars_offset: usize,
+}
+
+pub struct CharRange<'a> {
+    chunks: ChunkAndRanges<'a>,
+    curr: Option<CharRangeState<'a>>,
+    buffer: CircularBuffer<2, (char, Range<usize>)>,
+    state: CharRangeBufferState,
+}
+
+impl<'a> CharRange<'a> {
     pub(super) fn new(rope: &'a Rope, range: Range<usize>, offset: usize) -> Self {
         let mut chunks = ChunkAndRanges::new(rope, range, offset);
-        let curr = Self::chunks_next(&mut chunks);
-        Self { chunks, curr }
+        let curr = chunks.next().map(|(chunk, chunk_range)| CharRangeState {
+            chunk,
+            chunk_range,
+            chars: chunk.char_indices(),
+            chars_offset: 0,
+        });
+        let buffer = CircularBuffer::new();
+        Self { curr, chunks, buffer, state: CharRangeBufferState::Buffering }
     }
 
-    fn chunks_next<'b>(
-        chunks: &mut ChunkAndRanges<'b>,
-    ) -> Option<((&'b [u8], Range<usize>), bstr::CharIndices<'b>, usize)> {
-        chunks
-            .next()
-            .map(|(chunk, range)| ((chunk, range), chunk.char_indices(), 0))
-    }
+    // fn chunks_next<'b>(chunks: &mut ChunkAndRanges<'b>) -> Option<CharRangesState<'b>> {
+    //     chunks.next().map(|(chunk, chunk_range)| CharRangesState {
+    //         chunk,
+    //         chunk_range,
+    //         chars: chunk.char_indices(),
+    //         chars_offset: 0,
+    //         buffer: CircularBuffer::new(),
+    //     })
+    // }
 
     pub fn offset(&self) -> usize {
-        self.curr
+        let offset = self
+            .curr
             .as_ref()
-            .map(|((_, range), _, offset)| range.start + offset)
-            .unwrap_or(self.chunks.offset)
+            .map(|s| s.chunk_range.start + s.chars_offset)
+            .unwrap_or(self.chunks.offset);
+        let replay_offset = match self.state {
+            CharRangeBufferState::Buffering => 0,
+            CharRangeBufferState::Replaying { offset } => offset,
+        };
+        offset - replay_offset
     }
-}
 
-impl<'a> Iterator for CharAndRanges<'a> {
-    type Item = (char, Range<usize>);
-
-    fn next(&mut self) -> Option<Self::Item> {
+    pub fn next(&mut self) -> Option<(char, Range<usize>)> {
         loop {
             match self.curr.as_mut() {
                 None => break None,
-                Some(((_, r), chars, ref mut offset)) => match chars.next() {
-                    None => self.curr = CharAndRanges::chunks_next(&mut self.chunks),
-                    Some((start, end, c)) => {
-                        let range = (r.start + start)..(r.start + end);
-                        *offset += range.len();
-                        break Some((c, range));
+                Some(CharRangeState {
+                    chunk,
+                    chunk_range,
+                    ref mut chars,
+                    ref mut chars_offset,
+                }) => {
+                    // abc
+                    match self.state {
+                        CharRangeBufferState::Replaying { offset } => {
+                            self.state = if offset == 1 {
+                                CharRangeBufferState::Buffering
+                            } else {
+                                CharRangeBufferState::Replaying { offset: offset - 1 }
+                            };
+                            break self
+                                .buffer
+                                .get(offset - 1)
+                                .map(|(c, range)| (*c, range.clone()));
+                        }
+                        CharRangeBufferState::Buffering => match chars.next() {
+                            None => {
+                                self.curr =
+                                    self.chunks
+                                        .next()
+                                        .map(|(chunk, chunk_range)| CharRangeState {
+                                            chunk,
+                                            chunk_range,
+                                            chars: chunk.char_indices(),
+                                            chars_offset: 0,
+                                        })
+                            }
+                            Some((start, end, c)) => {
+                                let range_offset = chunk_range.start;
+                                let range = (range_offset + start)..(range_offset + end);
+                                *chars_offset += range.len();
+                                self.buffer.push_front((c, range.clone()));
+                                break Some((c, range));
+                            }
+                        },
                     }
-                },
+                }
             }
+        }
+    }
+
+    pub fn prev(&mut self) -> Option<(char, Range<usize>)> {
+        let offset = match self.state {
+            CharRangeBufferState::Buffering => 0,
+            CharRangeBufferState::Replaying { offset } => offset,
+        };
+        self.state = CharRangeBufferState::Replaying { offset: offset + 1 };
+        match self.buffer.get(offset) {
+            None => panic!("empty buffer cursor lookback"),
+            Some((c, range)) => Some((*c, range.clone())),
         }
     }
 }
 
-pub struct Chars<'a>(CharAndRanges<'a>);
+impl<'a> Iterator for CharRange<'a> {
+    type Item = (char, Range<usize>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
+    }
+}
+
+pub struct Chars<'a>(CharRange<'a>);
 
 impl<'a> Chars<'a> {
     pub(super) fn new(rope: &'a Rope, range: Range<usize>, offset: usize) -> Self {
-        Self(CharAndRanges::new(rope, range, offset))
+        Self(CharRange::new(rope, range, offset))
     }
 
     pub fn offset(&self) -> usize {
         self.0.offset()
+    }
+
+    pub fn next(&mut self) -> Option<char> {
+        self.0.next().map(|(chunk, _)| chunk)
+    }
+
+    pub fn prev(&mut self) -> Option<char> {
+        self.0.prev().map(|(chunk, _)| chunk)
     }
 }
 
@@ -256,7 +342,7 @@ impl<'a> Iterator for Chars<'a> {
     type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|(chunk, _)| chunk)
+        self.next()
     }
 }
 

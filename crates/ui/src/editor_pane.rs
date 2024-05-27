@@ -16,7 +16,7 @@ impl<'a> EditorPane<'a> {
     }
 
     fn screen_offset(&self, dims: tui::Rect) -> editor::Point {
-        let cursor = self.editor.cursor.clone();
+        let cursor = self.editor.cursor;
         let width: usize = dims.width.into();
         let height: usize = dims.height.into();
         let column = if cursor.column >= width {

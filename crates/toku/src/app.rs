@@ -36,7 +36,8 @@ impl App {
                 }
             }
 
-            app.await?
+            let res = app.await;
+            res?
         })
     }
 
@@ -71,7 +72,7 @@ impl App {
                 let pane = ui::EditorPane::new(&theme, buffer, editor);
                 frame.render_widget(pane, area);
 
-                let cursor = editor.cursor.clone();
+                let cursor = editor.cursor;
                 frame.set_cursor(cursor.column as u16, cursor.line as u16);
             })?;
 

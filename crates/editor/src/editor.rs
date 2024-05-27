@@ -1,7 +1,7 @@
 use crate::{Buffer, BufferId};
-use core::Point;
 use crossterm::event::KeyEvent;
 use slotmap::new_key_type;
+use tore::Point;
 
 new_key_type! {
     pub struct Id;
@@ -60,6 +60,7 @@ impl Editor {
                 KeyCode::Right | KeyCode::Char('l') => self.cursor_move_right(buffer),
                 KeyCode::Char('w') => self.cursor_jump_forward_word_next(buffer),
                 KeyCode::Char('e') => self.cursor_jump_forward_word_end(buffer),
+                KeyCode::Char('0') => self.cursor_jump_line_zero(buffer),
                 // KeyCode::Char('i') => Some(Command::ModeSet(Mode::Insert)),
                 _ => (),
             },

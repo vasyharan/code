@@ -6,7 +6,6 @@ pub use client::{Client, Command, Event};
 pub use language::Language;
 
 use editor::BufferContents;
-use rope::Rope;
 use tree_sitter as ts;
 
 #[derive(Debug)]

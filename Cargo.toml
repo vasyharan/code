@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.dependencies]
-core = { path = "./crates/core" }
+tore = { path = "./crates/core" }
 editor = { path = "./crates/editor" }
 rope = { path = "./crates/rope" }
 sumtree = { path = "./crates/sumtree" }

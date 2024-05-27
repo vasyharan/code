@@ -10,13 +10,14 @@ doctest = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-core.workspace = true
 anyhow.workspace = true
 crossterm.workspace = true
 slotmap.workspace = true
 tokio.workspace = true
 iset.workspace = true
+tracing.workspace = true
 
 rope.workspace = true
+tore.workspace = true
 
 tokio-stream = {version = "0.1", features = ["io-util"]}

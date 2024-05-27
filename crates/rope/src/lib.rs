@@ -1,6 +1,6 @@
-use core::Point;
 use std::ops::{Range, RangeBounds};
 use sumtree::{Colour, Node, SumTree};
+use tore::Point;
 
 #[cfg(test)]
 use bstr::{BString, ByteVec};
@@ -10,11 +10,11 @@ mod error;
 mod slab;
 mod util;
 
-use crate::cursor::{CursorPosition, SlabCursor};
+use crate::cursor::SlabCursor;
 use crate::error::{Error, Result};
 use crate::slab::Slab;
 
-pub use crate::cursor::{CharAndRanges, Chars, ChunkAndRanges, Chunks, Lines};
+pub use crate::cursor::{CharRange, Chars, ChunkAndRanges, Chunks, Lines};
 pub use crate::slab::SlabAllocator;
 
 #[derive(Debug, Clone)]
@@ -50,15 +50,16 @@ impl Rope {
                 Node::Branch { .. } => unreachable!("sumtree seek must return leaf node"),
                 Node::Leaf { item, .. } => {
                     let summary = cursor.summary();
-                    let (line_offset, column_offset) = item.as_bytes()[..pos.offset]
-                        .into_iter()
-                        .fold((0, 0), |(ls, cs), b| {
-                            if *b == b'\n' {
-                                (ls + 1, 0)
-                            } else {
-                                (ls, cs + 1)
-                            }
-                        });
+                    let (line_offset, column_offset) =
+                        item.as_bytes()[..pos.offset]
+                            .iter()
+                            .fold((0, 0), |(ls, cs), b| {
+                                if *b == b'\n' {
+                                    (ls + 1, 0)
+                                } else {
+                                    (ls, cs + 1)
+                                }
+                            });
                     let line = summary.stats.lines.line + line_offset;
                     let column = summary.stats.lines.column + column_offset;
                     Point { line, column }
@@ -72,9 +73,9 @@ impl Rope {
         Chunks::new(self, range, offset)
     }
 
-    pub fn char_indices(&self, range: impl RangeBounds<usize>, offset: usize) -> CharAndRanges {
+    pub fn char_range(&self, range: impl RangeBounds<usize>, offset: usize) -> CharRange {
         let range = util::bound_range(&range, 0..self.len());
-        CharAndRanges::new(self, range, offset)
+        CharRange::new(self, range, offset)
     }
 
     pub fn chars(&self, range: impl RangeBounds<usize>, offset: usize) -> Chars {
@@ -98,19 +99,23 @@ impl Rope {
     }
 
     pub fn char_at(&self, point: Point) -> Option<char> {
-        use bstr::ByteSlice;
+        // use bstr::ByteSlice;
 
-        self.line(point.line).and_then(|line| {
-            let mut column = point.column;
-            for chunk in line.chunks(0) {
-                for c in chunk.chars() {
-                    if column == 0 {
-                        return Some(c);
-                    }
-                    column -= 1; // TODO: width compute
-                }
-            }
-            None
+        // self.line(point.line).and_then(|line| {
+        //     let mut column = point.column;
+        //     for chunk in line.chunks(0) {
+        //         for c in chunk.chars() {
+        //             if column == 0 {
+        //                 return Some(c);
+        //             }
+        //             column -= 1; // TODO: width compute
+        //         }
+        //     }
+        //     None
+        // })
+        self.point_to_offset(point).and_then(|offset| {
+            /* abd */
+            self.chars(.., offset).next()
         })
     }
 
@@ -129,7 +134,7 @@ impl Rope {
                 let leaf = cursor
                     .seek(|node| {
                         let summary = node.summary();
-                        let left = summary.left.unwrap_or(Stats::default());
+                        let left = summary.left.unwrap_or_default();
                         if offset < left.len {
                             sumtree::cursor::Direction::Left
                         } else if offset >= left.len {
@@ -283,15 +288,15 @@ impl sumtree::Item for Slab {
         let bs = self.as_bytes();
         let len = bs.len();
         let (len_lines, len_last_line) =
-            bs.into_iter()
-                .fold((vec![], 0 as usize), |(counts, last_count), ch| {
+            bs.iter()
+                .fold((vec![], 0_usize), |(counts, last_count), ch| {
                     if *ch == b'\n' {
                         ([counts, [last_count].to_vec()].concat(), 0)
                     } else {
                         (counts, last_count + 1)
                     }
                 });
-        let len_first_line = *len_lines.get(0).unwrap_or(&0);
+        let len_first_line = *len_lines.first().unwrap_or(&0);
         let lines = Point { line: len_lines.len(), column: len_last_line };
         let stats = Stats { len, lines, len_first_line, len_last_line };
         Metrics { stats, left: None }
@@ -351,9 +356,10 @@ impl sumtree::Summary for Metrics {
 
 #[cfg(test)]
 mod tests {
-    use bstr::ByteSlice;
-
     use super::*;
+
+    use bstr::ByteSlice;
+    use circular_buffer::CircularBuffer;
 
     #[test]
     fn basic_tests() {
@@ -424,7 +430,26 @@ mod tests {
         assert!(rope.is_balanced());
         assert_eq!(rope.to_bstring(), contents);
 
-        let line_offsets = vec![0, 34, 78, 109, 134, 187];
+        let mut chars = rope.char_range(.., 0);
+        let mut lookback = CircularBuffer::<2, _>::new();
+        for (start, end, c) in contents.char_indices() {
+            assert_eq!(chars.next(), Some((c, start..end)));
+            assert_eq!(chars.offset(), end);
+            lookback.push_front((c, start..end));
+
+            assert_eq!(chars.prev().as_ref(), lookback.get(0));
+            if start > 1 {
+                assert_eq!(chars.prev().as_ref(), lookback.get(1));
+                _ = chars.next();
+            }
+
+            assert_eq!(chars.next(), Some((c, start..end)));
+        }
+        assert_eq!(chars.next(), None);
+        assert_eq!(chars.prev().as_ref(), lookback.get(0));
+        assert_eq!(chars.prev().as_ref(), lookback.get(1));
+
+        let line_offsets = [0, 34, 78, 109, 134, 187];
         for (line_num, (line, expected)) in rope.lines(..).zip(line_offsets.iter()).enumerate() {
             let offset = line.range.start;
             assert_eq!(offset, *expected, "line num={}", line_num)
@@ -433,11 +458,11 @@ mod tests {
         for (linenum, (line, offset)) in lines.iter().zip(line_offsets.iter()).enumerate() {
             for (start, end, _) in line.char_indices() {
                 let point = Point { line: linenum, column: start };
-                let actual = rope.point_to_offset(point.clone());
+                let actual = rope.point_to_offset(point);
                 assert_eq!(actual, Some(offset + start), "{:?}", point);
 
                 let actual = rope.offset_to_point(offset + start);
-                assert_eq!(actual, Some(point.clone()), "{:?}", point);
+                assert_eq!(actual, Some(point), "{:?}", point);
 
                 for column in (start + 1)..end {
                     let actual = rope.point_to_offset(Point { line: linenum, column });
@@ -497,7 +522,7 @@ mod tests {
             assert_eq!(line, lines[i].as_bstr(), "line={}", i);
         }
 
-        let mut char_indicies = rope.char_indices(.., 0);
+        let mut char_indicies = rope.char_range(.., 0);
         for (start, end, c) in contents.char_indices() {
             assert_eq!(char_indicies.next(), Some((c, start..end)));
         }

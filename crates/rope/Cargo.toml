@@ -10,7 +10,7 @@ doctest = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-core.workspace = true
+tore.workspace = true
 
 tokio.workspace = true
 sumtree.workspace = true
@@ -19,3 +19,4 @@ bstr.workspace = true
 
 bytecount = "0.6"
 memchr = "2.7"
+circular-buffer = "0.1.7"
