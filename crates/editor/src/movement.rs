@@ -4,11 +4,11 @@ use tracing::{event, Level};
 use crate::{Buffer, Editor};
 
 impl Editor {
-    pub(crate) fn cursor_move_left(&mut self, _buffer: &Buffer) {
+    pub fn cursor_move_left(&mut self, _buffer: &Buffer) {
         self.cursor.move_prev_column();
     }
 
-    pub(crate) fn cursor_move_up(&mut self, buffer: &Buffer) {
+    pub fn cursor_move_up(&mut self, buffer: &Buffer) {
         self.cursor.move_prev_line();
         match buffer.contents.line(self.cursor.line) {
             None => (),
@@ -19,7 +19,7 @@ impl Editor {
         }
     }
 
-    pub(crate) fn cursor_move_right(&mut self, buffer: &Buffer) {
+    pub fn cursor_move_right(&mut self, buffer: &Buffer) {
         self.cursor.move_next_column();
         match buffer.contents.char_at(self.cursor) {
             None | Some('\n') => self.cursor.move_prev_column(),
@@ -27,7 +27,7 @@ impl Editor {
         }
     }
 
-    pub(crate) fn cursor_move_down(&mut self, buffer: &Buffer) {
+    pub fn cursor_move_down(&mut self, buffer: &Buffer) {
         self.cursor.move_next_line();
         match buffer.contents.line(self.cursor.line) {
             None => self.cursor.move_prev_line(),
@@ -38,11 +38,11 @@ impl Editor {
         }
     }
 
-    pub(crate) fn cursor_jump_line_zero(&mut self, buffer: &Buffer) {
+    pub fn cursor_jump_line_zero(&mut self, buffer: &Buffer) {
         self.cursor.column = 0;
     }
 
-    pub(crate) fn cursor_jump_forward_skip_ws(&mut self, buffer: &Buffer) {
+    pub fn cursor_jump_forward_skip_ws(&mut self, buffer: &Buffer) {
         let offset = buffer
             .contents
             .point_to_offset(self.cursor)
@@ -58,17 +58,17 @@ impl Editor {
             .offset_to_point(offset)
             .expect("invalid offset");
     }
-    pub(crate) fn cursor_jump_backward_word_end(&mut self, buffer: &Buffer) {
-        // ge
-        todo!()
-    }
-
-    pub(crate) fn cursor_jump_backward_word_next(&mut self, buffer: &Buffer) {
+    pub fn cursor_jump_backward_word_start(&mut self, buffer: &Buffer) {
         // b
         todo!()
     }
 
-    pub(crate) fn cursor_jump_forward_word_end(&mut self, buffer: &Buffer) {
+    pub fn cursor_jump_backward_prev_word_end(&mut self, buffer: &Buffer) {
+        // ge
+        todo!()
+    }
+
+    pub fn cursor_jump_forward_word_end(&mut self, buffer: &Buffer) {
         let offset = buffer
             .contents
             .point_to_offset(self.cursor)
@@ -135,7 +135,7 @@ impl Editor {
             .expect("invalid offset");
     }
 
-    pub(crate) fn cursor_jump_forward_word_next(&mut self, buffer: &Buffer) {
+    pub fn cursor_jump_forward_next_word_start(&mut self, buffer: &Buffer) {
         let offset = buffer
             .contents
             .point_to_offset(self.cursor)

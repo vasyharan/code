@@ -19,8 +19,12 @@ pub struct Theme {
 }
 
 impl Theme {
-    pub(crate) fn colour(&self, name: &str) -> Option<Color> {
+    pub(crate) fn scheme(&self, name: &str) -> Option<Color> {
         self.scheme.get(name).map(|n| self.palette[n])
+    }
+
+    pub(crate) fn palette(&self, name: &str) -> Option<Color> {
+        self.palette.get(name).copied()
     }
 }
 

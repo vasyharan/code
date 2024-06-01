@@ -225,6 +225,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
+name = "commands"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.5.0",
+ "crossterm",
+ "fuzzy-matcher",
+ "slotmap",
+ "tokio",
+ "tore",
+ "tracing",
+]
+
+[[package]]
 name = "crossterm"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -255,6 +268,7 @@ name = "editor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "commands",
  "crossterm",
  "iset",
  "rope",
@@ -358,6 +372,15 @@ dependencies = [
  "pin-project-lite",
  "pin-utils",
  "slab",
+]
+
+[[package]]
+name = "fuzzy-matcher"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54614a3312934d066701a80f20f15fa3b56d67ac7722b39eea5b4c9dd1d66c94"
+dependencies = [
+ "thread_local",
 ]
 
 [[package]]
@@ -884,6 +907,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "commands",
  "crossterm",
  "editor",
  "futures",
@@ -893,6 +917,7 @@ dependencies = [
  "slotmap",
  "syntax",
  "tokio",
+ "tore",
  "tracing",
  "tracing-subscriber",
  "ui",
@@ -902,6 +927,12 @@ dependencies = [
 [[package]]
 name = "tore"
 version = "0.1.0"
+dependencies = [
+ "bitflags 2.5.0",
+ "crossterm",
+ "fuzzy-matcher",
+ "tracing",
+]
 
 [[package]]
 name = "tracing"
@@ -989,8 +1020,10 @@ name = "ui"
 version = "0.1.0"
 dependencies = [
  "bstr",
+ "commands",
  "editor",
  "ratatui",
+ "tore",
  "tracing",
 ]
 

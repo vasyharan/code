@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/commands",
     "crates/core",
     "crates/editor",
     "crates/rope",
@@ -11,11 +12,12 @@ members = [
 ]
 
 [workspace.dependencies]
-tore = { path = "./crates/core" }
+commands = { path = "./crates/commands" }
 editor = { path = "./crates/editor" }
 rope = { path = "./crates/rope" }
 sumtree = { path = "./crates/sumtree" }
 syntax = { path = "./crates/syntax" }
+tore = { path = "./crates/core" }
 ui = { path = "./crates/ui" }
 
 anyhow = "1.0.75"

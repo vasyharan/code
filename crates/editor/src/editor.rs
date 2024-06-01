@@ -1,13 +1,13 @@
 use crate::{Buffer, BufferId};
 use crossterm::event::KeyEvent;
 use slotmap::new_key_type;
-use tore::Point;
+use tore::{CursorPoint, Point};
 
 new_key_type! {
     pub struct Id;
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
     Normal,
@@ -24,13 +24,16 @@ pub enum Direction {
 
 #[derive(Debug, Clone)]
 pub enum CursorJump {
-    ForwardEndWord,
-    ForwardNextWord,
+    ForwardWordEnd,
+    ForwardNextWordStart,
+    BackwardWordStart,
+    BackwardPrevWordEnd,
 }
 
 #[derive(Debug, Clone)]
 pub enum Command {
     ModeSet(Mode),
+    SwapBuffer(BufferId),
     CursorMove(Direction),
     CursorJump(CursorJump),
 }
@@ -58,7 +61,7 @@ impl Editor {
                 KeyCode::Down | KeyCode::Char('j') => self.cursor_move_down(buffer),
                 KeyCode::Left | KeyCode::Char('h') => self.cursor_move_left(buffer),
                 KeyCode::Right | KeyCode::Char('l') => self.cursor_move_right(buffer),
-                KeyCode::Char('w') => self.cursor_jump_forward_word_next(buffer),
+                KeyCode::Char('w') => self.cursor_jump_forward_next_word_start(buffer),
                 KeyCode::Char('e') => self.cursor_jump_forward_word_end(buffer),
                 KeyCode::Char('0') => self.cursor_jump_line_zero(buffer),
                 // KeyCode::Char('i') => Some(Command::ModeSet(Mode::Insert)),
@@ -77,9 +80,14 @@ impl Editor {
         None
     }
 
+    pub fn swap_buffer(&mut self, buffer_id: BufferId) {
+        self.buffer_id = buffer_id;
+    }
+
     pub fn command(&mut self, buffer: &Buffer, command: Command) {
         debug_assert!(buffer.id == self.buffer_id);
         match command {
+            Command::SwapBuffer(buffer_id) => self.swap_buffer(buffer_id),
             Command::ModeSet(mode) => self.mode = mode,
             Command::CursorMove(direction) => match direction {
                 Direction::Up => self.cursor_move_up(buffer),
@@ -88,9 +96,54 @@ impl Editor {
                 Direction::Right => self.cursor_move_right(buffer),
             },
             Command::CursorJump(jump) => match jump {
-                CursorJump::ForwardEndWord => self.cursor_jump_forward_word_end(buffer),
-                CursorJump::ForwardNextWord => self.cursor_jump_forward_word_next(buffer),
+                CursorJump::ForwardWordEnd => self.cursor_jump_forward_word_end(buffer),
+                CursorJump::ForwardNextWordStart => {
+                    self.cursor_jump_forward_next_word_start(buffer)
+                }
+                CursorJump::BackwardWordStart => self.cursor_jump_backward_word_start(buffer),
+                CursorJump::BackwardPrevWordEnd => self.cursor_jump_backward_prev_word_end(buffer),
             },
         };
     }
+
+    // Entry { command: "cursor.left".to_string(), aliases: vec![] },
+    // Entry { command: "cursor.right".to_string(), aliases: vec![] },
+    // Entry { command: "cursor.up".to_string(), aliases: vec![] },
+    // Entry { command: "cursor.down".to_string(), aliases: vec![] },
+    // Entry { command: "cursor.forwardWord".to_string(), aliases: vec![] },
+    // Entry { command: "cursor.backwardWord".to_string(), aliases: vec![] },
+    // Entry { command: "cursor.forwardWordEnd".to_string(), aliases: vec![] },
+    // Entry { command: "cursor.backwardWordEnd".to_string(), aliases: vec![] },
+    // pub fn commands() -> Vec<(commands::Entry, Command)> {
+    //     vec![
+    //         (
+    //             commands::Entry {
+    //                 command: "cursor.jump.forwardWordEnd".to_string(),
+    //                 aliases: vec![],
+    //             },
+    //             Command::CursorJump(CursorJump::ForwardWordEnd),
+    //         ),
+    //         (
+    //             commands::Entry {
+    //                 command: "cursor.jump.forwardNextWordStart".to_string(),
+    //                 aliases: vec![],
+    //             },
+    //             Command::CursorJump(CursorJump::ForwardNextWordStart),
+    //         ),
+    //         (
+    //             commands::Entry {
+    //                 command: "cursor.jump.backwardWordStart".to_string(),
+    //                 aliases: vec![],
+    //             },
+    //             Command::CursorJump(CursorJump::BackwardWordStart),
+    //         ),
+    //         (
+    //             commands::Entry {
+    //                 command: "cursor.jump.backwardPrevWordEnd".to_string(),
+    //                 aliases: vec![],
+    //             },
+    //             Command::CursorJump(CursorJump::BackwardPrevWordEnd),
+    //         ),
+    //     ]
+    // }
 }

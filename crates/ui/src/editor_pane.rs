@@ -1,6 +1,7 @@
 use editor::{Buffer, Editor};
 use ratatui::prelude as tui;
 use ratatui::widgets::Widget;
+use tore::CursorPoint;
 
 use crate::Theme;
 
@@ -31,11 +32,13 @@ impl<'a> EditorPane<'a> {
         };
         editor::Point { line, column }
     }
-}
 
-impl Widget for EditorPane<'_> {
+    fn offset_cursor(&self, _area: tui::Rect, cursor: tore::Point) -> CursorPoint {
+        CursorPoint { x: cursor.column as u16, y: cursor.line as u16 }
+    }
+
     #[tracing::instrument(skip(self, buf))]
-    fn render(self, dims: tui::Rect, buf: &mut tui::Buffer) {
+    pub fn render(self, dims: tui::Rect, buf: &mut tui::Buffer) -> CursorPoint {
         use bstr::ByteSlice;
 
         let offset = self.screen_offset(dims);
@@ -60,7 +63,7 @@ impl Widget for EditorPane<'_> {
                         let cell = buf.get_mut(x, y);
                         // cell.set_bg(self.theme.bg().0);
                         if let Some((_, name)) = self.buffer.highlights.iter(char_range).next() {
-                            if let Some(color) = self.theme.colour(name) {
+                            if let Some(color) = self.theme.scheme(name) {
                                 cell.set_fg(color.0);
                             }
                         }
@@ -74,5 +77,7 @@ impl Widget for EditorPane<'_> {
                 buf.get_mut(x, y).set_char('~');
             }
         }
+
+        self.offset_cursor(dims, self.editor.cursor)
     }
 }

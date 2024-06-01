@@ -25,3 +25,11 @@ impl Point {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialOrd, PartialEq)]
+pub struct CursorPoint {
+    pub x: u16,
+    pub y: u16,
+}
+
+impl CursorPoint {}

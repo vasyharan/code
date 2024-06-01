@@ -10,7 +10,7 @@ new_key_type! {
     pub struct Id;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Command {
     Highlight(Highlights),
 }
