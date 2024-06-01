@@ -38,7 +38,7 @@ pub struct Entry<T> {
 }
 
 #[derive(Debug)]
-pub struct Result<'a, T> {
+pub struct ResultEntry<'a, T> {
     pub entry: &'a Entry<T>,
     pub score: i64,
     pub indices: Vec<usize>,
@@ -63,8 +63,10 @@ pub struct Commands<T> {
     pub entries: SlotMap<EntryId, Entry<T>>,
 
     pub selected: Option<EntryId>,
-    pub filtered: Vec<SearchResult>,
+    filtered: Vec<SearchResult>,
 }
+
+const MAX_RESULTS: usize = 32;
 
 impl<T> Commands<T> {
     pub fn new(tx: mpsc::Sender<T>) -> Self {
@@ -106,12 +108,16 @@ impl<T> Commands<T> {
 
     pub fn reset(&mut self) {
         self.query = String::new();
+        self.cursor = Point::default();
+        self.selected = None;
+        self.filtered.clear();
+        self.search();
     }
 
-    pub fn results(&self) -> Vec<Result<T>> {
+    pub fn results(&self) -> Vec<ResultEntry<T>> {
         self.filtered
             .iter()
-            .map(|SearchResult { entry, score, indices }| Result {
+            .map(|SearchResult { entry, score, indices }| ResultEntry {
                 entry: &self.entries[*entry],
                 score: *score,
                 indices: indices.clone(),
@@ -122,14 +128,23 @@ impl<T> Commands<T> {
     #[tracing::instrument(skip(self))]
     pub fn search(&mut self) {
         let mut results = vec![];
-        let matcher = SkimMatcherV2::default();
-        for (id, entry) in &self.entries {
-            let result = matcher.fuzzy_indices(&entry.command, &self.query);
-            if let Some((score, indices)) = result {
-                results.push(SearchResult { entry: id, score, indices });
+        if self.query.is_empty() {
+            for (id, _) in &self.entries {
+                if results.len() > MAX_RESULTS {
+                    break;
+                }
+                results.push(SearchResult { entry: id, score: 0, indices: vec![] });
             }
+        } else {
+            let matcher = SkimMatcherV2::default();
+            for (id, entry) in &self.entries {
+                let result = matcher.fuzzy_indices(&entry.command, &self.query);
+                if let Some((score, indices)) = result {
+                    results.push(SearchResult { entry: id, score, indices });
+                }
+            }
+            results.sort_by_key(|entry| entry.score);
         }
-        results.sort_by_key(|entry| entry.score);
 
         self.selected = results.first().map(|r| r.entry);
         self.filtered = results;

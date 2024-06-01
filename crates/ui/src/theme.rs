@@ -3,6 +3,12 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy)]
 pub struct Color(pub ratatui::style::Color);
 
+impl Into<ratatui::style::Color> for Color {
+    fn into(self) -> ratatui::style::Color {
+        self.0
+    }
+}
+
 impl From<&str> for Color {
     fn from(src: &str) -> Self {
         let r = u8::from_str_radix(&src[1..3], 16).expect("valid hex red value");

@@ -219,6 +219,7 @@ impl App {
                         commands::Command::Close => {
                             let pane_id = state.visible_panes.pop();
                             debug_assert_eq!(pane_id, Some(commands_pane_id));
+                            state.commands.reset();
                             state.focused_pane = state
                                 .visible_panes
                                 .last()
