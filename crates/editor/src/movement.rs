@@ -39,17 +39,17 @@ impl Editor {
         self.cursor.column = 0;
     }
 
-    pub fn cursor_jump_backward_word_start(&mut self, _buffer: &Buffer) {
+    pub fn cursor_jump_start_of_nearest_word(&mut self, _buffer: &Buffer) {
         // b
         todo!()
     }
 
-    pub fn cursor_jump_backward_prev_word_end(&mut self, _buffer: &Buffer) {
+    pub fn cursor_jump_start_of_last_word(&mut self, _buffer: &Buffer) {
         // ge
         todo!()
     }
 
-    pub fn cursor_jump_forward_word_end(&mut self, buffer: &Buffer) {
+    pub fn cursor_jump_end_of_nearest_word(&mut self, buffer: &Buffer) {
         let offset = buffer
             .contents
             .point_to_offset(self.cursor)
@@ -116,7 +116,7 @@ impl Editor {
             .expect("invalid offset");
     }
 
-    pub fn cursor_jump_forward_next_word_start(&mut self, buffer: &Buffer) {
+    pub fn cursor_jump_start_of_next_word(&mut self, buffer: &Buffer) {
         let offset = buffer
             .contents
             .point_to_offset(self.cursor)

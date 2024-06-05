@@ -382,22 +382,14 @@ fn register_editor_commands(commands: &mut Commands<Command>) {
     use editor::{CursorJump, Direction};
 
     let cmds = [
-        ("cursor.moveUp", vec![], CursorMove(Direction::Up)),
-        ("cursor.moveDown", vec![], CursorMove(Direction::Down)),
-        ("cursor.moveLeft", vec![], CursorMove(Direction::Left)),
-        ("cursor.moveRight", vec![], CursorMove(Direction::Right)),
-        ("cursor.jumpForwardWordEnd", vec![], CursorJump(CursorJump::ForwardWordEnd)),
-        (
-            "cursor.jumpForwardNextWordStart",
-            vec![],
-            CursorJump(CursorJump::ForwardNextWordStart),
-        ),
-        ("cursor.jumpBackWordStart", vec![], CursorJump(CursorJump::BackwardWordStart)),
-        (
-            "cursor.jumpBackPreviousWordEnd",
-            vec![],
-            CursorJump(CursorJump::BackwardPrevWordEnd),
-        ),
+        ("cursor.up", vec![], CursorMove(Direction::Up)),
+        ("cursor.down", vec![], CursorMove(Direction::Down)),
+        ("cursor.left", vec![], CursorMove(Direction::Left)),
+        ("cursor.right", vec![], CursorMove(Direction::Right)),
+        ("cursor.startOfNextWord", vec![], CursorJump(CursorJump::StartOfNextWord)),
+        ("cursor.startOfLastWord", vec![], CursorJump(CursorJump::StartOfLastWord)),
+        ("cursor.startOfNearestWord", vec![], CursorJump(CursorJump::StartOfNearestWord)),
+        ("cursor.endOfNearestWord", vec![], CursorJump(CursorJump::EndOfNearestWord)),
     ];
     for (name, aliases, cmd) in cmds {
         commands.register(name, aliases, Command::FocusedEditor(cmd));

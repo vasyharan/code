@@ -1,8 +1,5 @@
-use anyhow::Result;
-
-use crate::{Buffer, BufferContents, BufferId};
+use crate::{Buffer, BufferId};
 use crossterm::event::KeyEvent;
-use rope::SlabAllocator;
 use slotmap::new_key_type;
 use tore::Point;
 
@@ -27,10 +24,10 @@ pub enum Direction {
 
 #[derive(Debug, Clone)]
 pub enum CursorJump {
-    ForwardWordEnd,
-    ForwardNextWordStart,
-    BackwardWordStart,
-    BackwardPrevWordEnd,
+    StartOfNextWord,
+    StartOfLastWord,
+    EndOfNearestWord,
+    StartOfNearestWord,
 }
 
 #[derive(Debug, Clone)]
@@ -64,8 +61,9 @@ impl Editor {
                 KeyCode::Down | KeyCode::Char('j') => self.cursor_move_down(buffer),
                 KeyCode::Left | KeyCode::Char('h') => self.cursor_move_left(buffer),
                 KeyCode::Right | KeyCode::Char('l') => self.cursor_move_right(buffer),
-                KeyCode::Char('w') => self.cursor_jump_forward_next_word_start(buffer),
-                KeyCode::Char('e') => self.cursor_jump_forward_word_end(buffer),
+                KeyCode::Char('w') => self.cursor_jump_start_of_next_word(buffer),
+                KeyCode::Char('e') => self.cursor_jump_end_of_nearest_word(buffer),
+                KeyCode::Char('b') => self.cursor_jump_start_of_nearest_word(buffer),
                 KeyCode::Char('0') => self.cursor_jump_line_zero(buffer),
                 // KeyCode::Char('i') => Some(Command::ModeSet(Mode::Insert)),
                 _ => (),
@@ -99,59 +97,11 @@ impl Editor {
                 Direction::Right => self.cursor_move_right(buffer),
             },
             Command::CursorJump(jump) => match jump {
-                CursorJump::ForwardWordEnd => self.cursor_jump_forward_word_end(buffer),
-                CursorJump::ForwardNextWordStart => {
-                    self.cursor_jump_forward_next_word_start(buffer)
-                }
-                CursorJump::BackwardWordStart => self.cursor_jump_backward_word_start(buffer),
-                CursorJump::BackwardPrevWordEnd => self.cursor_jump_backward_prev_word_end(buffer),
+                CursorJump::StartOfNextWord => self.cursor_jump_start_of_next_word(buffer),
+                CursorJump::StartOfLastWord => self.cursor_jump_start_of_last_word(buffer),
+                CursorJump::EndOfNearestWord => self.cursor_jump_end_of_nearest_word(buffer),
+                CursorJump::StartOfNearestWord => self.cursor_jump_start_of_nearest_word(buffer),
             },
         };
     }
-
-    // Entry { command: "cursor.left".to_string(), aliases: vec![] },
-    // Entry { command: "cursor.right".to_string(), aliases: vec![] },
-    // Entry { command: "cursor.up".to_string(), aliases: vec![] },
-    // Entry { command: "cursor.down".to_string(), aliases: vec![] },
-    // Entry { command: "cursor.forwardWord".to_string(), aliases: vec![] },
-    // Entry { command: "cursor.backwardWord".to_string(), aliases: vec![] },
-    // Entry { command: "cursor.forwardWordEnd".to_string(), aliases: vec![] },
-    // Entry { command: "cursor.backwardWordEnd".to_string(), aliases: vec![] },
-    // pub fn commands() -> Vec<(commands::Entry, Command)> {
-    //     vec![
-    //         (
-    //             commands::Entry {
-    //                 command: "cursor.jump.forwardWordEnd".to_string(),
-    //                 aliases: vec![],
-    //             },
-    //             Command::CursorJump(CursorJump::ForwardWordEnd),
-    //         ),
-    //         (
-    //             commands::Entry {
-    //                 command: "cursor.jump.forwardNextWordStart".to_string(),
-    //                 aliases: vec![],
-    //             },
-    //             Command::CursorJump(CursorJump::ForwardNextWordStart),
-    //         ),
-    //         (
-    //             commands::Entry {
-    //                 command: "cursor.jump.backwardWordStart".to_string(),
-    //                 aliases: vec![],
-    //             },
-    //             Command::CursorJump(CursorJump::BackwardWordStart),
-    //         ),
-    //         (
-    //             commands::Entry {
-    //                 command: "cursor.jump.backwardPrevWordEnd".to_string(),
-    //                 aliases: vec![],
-    //             },
-    //             Command::CursorJump(CursorJump::BackwardPrevWordEnd),
-    //         ),
-    //     ]
-    // }
-}
-
-#[tracing::instrument(skip(alloc))]
-async fn file_open(alloc: &mut SlabAllocator, path: &std::path::PathBuf) -> Result<BufferContents> {
-    Buffer::read(alloc, path).await
 }
