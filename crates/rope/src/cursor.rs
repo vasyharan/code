@@ -199,7 +199,6 @@ enum CharRangeBufferState {
 }
 
 struct CharRangeState<'a> {
-    chunk: &'a [u8],
     chunk_range: Range<usize>,
     chars: bstr::CharIndices<'a>,
     chars_offset: usize,
@@ -216,7 +215,6 @@ impl<'a> CharRange<'a> {
     pub(super) fn new(rope: &'a Rope, range: Range<usize>, offset: usize) -> Self {
         let mut chunks = ChunkAndRanges::new(rope, range, offset);
         let curr = chunks.next().map(|(chunk, chunk_range)| CharRangeState {
-            chunk,
             chunk_range,
             chars: chunk.char_indices(),
             chars_offset: 0,
@@ -248,15 +246,13 @@ impl<'a> CharRange<'a> {
         offset - replay_offset
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<(char, Range<usize>)> {
         loop {
             match self.curr.as_mut() {
                 None => break None,
                 Some(CharRangeState {
-                    chunk,
-                    chunk_range,
-                    ref mut chars,
-                    ref mut chars_offset,
+                    chunk_range, ref mut chars, ref mut chars_offset, ..
                 }) => {
                     // abc
                     match self.state {
@@ -277,7 +273,6 @@ impl<'a> CharRange<'a> {
                                     self.chunks
                                         .next()
                                         .map(|(chunk, chunk_range)| CharRangeState {
-                                            chunk,
                                             chunk_range,
                                             chars: chunk.char_indices(),
                                             chars_offset: 0,
@@ -329,6 +324,7 @@ impl<'a> Chars<'a> {
         self.0.offset()
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<char> {
         self.0.next().map(|(chunk, _)| chunk)
     }

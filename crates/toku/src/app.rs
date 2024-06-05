@@ -55,11 +55,11 @@ impl Pane {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Mode {
-    Editor(editor::Mode),
-    Commands(commands::Mode),
-}
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// pub enum Mode {
+//     Editor(editor::Mode),
+//     Commands(commands::Mode),
+// }
 
 #[derive(Debug)]
 pub struct App {
@@ -85,15 +85,6 @@ impl State {
             .expect("focused pane does not exist");
         debug_assert!(self.visible_panes.contains(&pane.id()), "focused pane not visible");
         pane.clone()
-    }
-
-    fn focused_pane_mut_ref(&mut self) -> &mut Pane {
-        let pane = self
-            .panes
-            .get_mut(self.focused_pane)
-            .expect("focused pane does not exist");
-        debug_assert!(self.visible_panes.contains(&pane.id()), "focused pane not visible");
-        pane
     }
 
     fn close_focused_pane(&mut self) {
@@ -144,21 +135,18 @@ impl State {
                         .get_mut(self.focused_pane)
                         .expect("focused pane does not exist");
 
-                    let command = match focused_pane {
+                    match focused_pane {
                         Pane::Commands(_, mode) => {
-                            let command = self
-                                .commands
-                                .process_key(key)
-                                .map(|cmd| Command::Commands(cmd));
-                            let command = command.or_else(|| match mode {
+                            let command = self.commands.process_key(key).map(Command::Commands);
+
+                            command.or(match mode {
                                 commands::Mode::Command => match key.code {
                                     KeyCode::Esc => {
                                         Some(Command::Commands(commands::Command::Close))
                                     }
                                     _ => None,
                                 },
-                            });
-                            command
+                            })
                         }
                         Pane::Editor(_, mode, editor_id) => {
                             let editor = &mut self.editors[*editor_id];
@@ -166,7 +154,8 @@ impl State {
                             let command = editor
                                 .process_key(key, buffer)
                                 .map(|cmd| Command::Editor(*editor_id, cmd));
-                            let command = command.or_else(|| match mode {
+
+                            command.or(match mode {
                                 editor::Mode::Normal => match key.code {
                                     KeyCode::Char(':') => {
                                         Some(Command::Commands(commands::Command::Open))
@@ -174,11 +163,9 @@ impl State {
                                     _ => None,
                                 },
                                 _ => None,
-                            });
-                            command
+                            })
                         }
-                    };
-                    command
+                    }
                 })
             }
         }
@@ -241,7 +228,7 @@ impl App {
             State { commands, buffers, editors, panes, visible_panes, focused_pane }
         };
 
-        let commands_pane_id = state.panes.insert_with_key(|k| Pane::new_commands(k));
+        let commands_pane_id = state.panes.insert_with_key(Pane::new_commands);
         let default_editor_id: EditorId = state
             .editors
             .keys()

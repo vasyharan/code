@@ -48,6 +48,7 @@ impl<'a, T: Item> Cursor<'a, T> {
         self.summary = self.summary.map(|_| T::Summary::default());
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&'a SumTree<T>> {
         self.goto_next_leaf();
         self.curr

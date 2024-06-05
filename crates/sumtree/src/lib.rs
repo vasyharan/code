@@ -122,12 +122,12 @@ impl<T: Item> Node<T> {
         }
     }
 
-    fn colour(&self) -> Colour {
-        match self {
-            Node::Branch { colour, .. } => *colour,
-            Node::Leaf { .. } => Colour::Black,
-        }
-    }
+    // fn colour(&self) -> Colour {
+    //     match self {
+    //         Node::Branch { colour, .. } => *colour,
+    //         Node::Leaf { .. } => Colour::Black,
+    //     }
+    // }
 
     fn black_height(&self) -> Result<usize, Error> {
         match self {

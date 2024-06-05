@@ -36,14 +36,14 @@ impl<'a, T> CommandsPane<'a, T> {
         dims: tui::Rect,
         num_results: usize,
     ) -> (tui::Rect, tui::Rect, tui::Rect) {
-        use std::cmp::{max, min};
+        use std::cmp::min;
 
         const WIDTH_RATIO: u16 = 4;
         let y = 0; // dims.height / 5;
         let x0 = dims.width / WIDTH_RATIO;
         let x1 = x0 * (WIDTH_RATIO - 1);
         let xwidth = min(x1 - x0, 80);
-        let rheight = min(13, max(1, num_results)) as u16;
+        let rheight = num_results.clamp(1, 13) as u16;
 
         let qborder = tui::Rect::new(x0, y, xwidth, 3 + rheight);
         let qcontent = tui::Rect::new(x0 + 1, y + 1, xwidth - 2, 1);
@@ -129,7 +129,7 @@ impl<'a, T> CommandsPane<'a, T> {
                     .unwrap_or("".to_string());
                 let mut indices = result
                     .map(|r| r.indices)
-                    .unwrap_or(vec![])
+                    .unwrap_or_default()
                     .into_iter()
                     .peekable();
                 let maxlen = area.width as usize;

@@ -163,8 +163,13 @@ impl Rope {
             }
         }
     }
+
     pub fn append(&self, text: Slab) -> Result<Self> {
         self.insert(self.len(), text)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn len(&self) -> usize {

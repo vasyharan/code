@@ -1,6 +1,6 @@
 #![feature(slice_range)]
 
-use std::ops::{Range, RangeBounds};
+use std::ops::RangeBounds;
 
 use bitflags::bitflags;
 use crossterm::event::{KeyEvent, KeyModifiers};
@@ -189,7 +189,7 @@ impl<T> Commands<T> {
         self.filtered = results;
     }
 
-    fn select_up(&mut self) -> () {
+    fn select_up(&mut self) {
         let idx = self
             .filtered
             .iter()
@@ -202,7 +202,7 @@ impl<T> Commands<T> {
         }
     }
 
-    fn select_down(&mut self) -> () {
+    fn select_down(&mut self) {
         let idx = self
             .filtered
             .iter()

@@ -15,13 +15,13 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl Error {
-    pub(super) fn deref_bound<T: Copy>(b: Bound<&T>) -> Bound<T> {
-        use Bound::*;
-        match b {
-            Included(x) => Included(*x),
-            Excluded(x) => Excluded(*x),
-            Unbounded => Unbounded,
-        }
-    }
-}
+// impl Error {
+//     pub(super) fn deref_bound<T: Copy>(b: Bound<&T>) -> Bound<T> {
+//         use Bound::*;
+//         match b {
+//             Included(x) => Included(*x),
+//             Excluded(x) => Excluded(*x),
+//             Unbounded => Unbounded,
+//         }
+//     }
+// }

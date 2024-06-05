@@ -1,6 +1,5 @@
 use editor::{Buffer, Editor};
 use ratatui::prelude as tui;
-use ratatui::widgets::Widget;
 use tore::CursorPoint;
 
 use crate::Theme;

@@ -3,9 +3,9 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy)]
 pub struct Color(pub ratatui::style::Color);
 
-impl Into<ratatui::style::Color> for Color {
-    fn into(self) -> ratatui::style::Color {
-        self.0
+impl From<Color> for ratatui::style::Color {
+    fn from(val: Color) -> Self {
+        val.0
     }
 }
 
