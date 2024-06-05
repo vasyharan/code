@@ -1,7 +1,10 @@
-use crate::{Buffer, BufferId};
+use anyhow::Result;
+
+use crate::{Buffer, BufferContents, BufferId};
 use crossterm::event::KeyEvent;
+use rope::SlabAllocator;
 use slotmap::new_key_type;
-use tore::{CursorPoint, Point};
+use tore::Point;
 
 new_key_type! {
     pub struct Id;
@@ -146,4 +149,9 @@ impl Editor {
     //         ),
     //     ]
     // }
+}
+
+#[tracing::instrument(skip(alloc))]
+async fn file_open(alloc: &mut SlabAllocator, path: &std::path::PathBuf) -> Result<BufferContents> {
+    Buffer::read(alloc, path).await
 }

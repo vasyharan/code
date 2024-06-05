@@ -1,7 +1,6 @@
 use anyhow::Result;
 use crossterm::cursor::{self, SetCursorStyle};
 use crossterm::event::Event;
-use crossterm::execute;
 use slotmap::{new_key_type, SlotMap};
 use tokio::sync::mpsc;
 
@@ -17,18 +16,19 @@ type EditorMap = SlotMap<EditorId, Editor>;
 pub enum Command {
     Quit,
     FileOpen(Option<EditorId>, std::path::PathBuf),
-
     Commands(commands::Command),
 
     Editor(EditorId, editor::EditorCommand),
     Buffer(BufferId, editor::BufferCommand),
+
+    FocusedEditor(editor::EditorCommand),
 }
 
 new_key_type! {
     pub struct PaneId;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Pane {
     Commands(PaneId, commands::Mode),
     Editor(PaneId, editor::Mode, EditorId),
@@ -78,13 +78,110 @@ struct State {
 }
 
 impl State {
-    fn focused_pane_mut(&mut self) -> &mut Pane {
+    fn focused_pane(&self) -> Pane {
+        let pane = self
+            .panes
+            .get(self.focused_pane)
+            .expect("focused pane does not exist");
+        debug_assert!(self.visible_panes.contains(&pane.id()), "focused pane not visible");
+        pane.clone()
+    }
+
+    fn focused_pane_mut_ref(&mut self) -> &mut Pane {
         let pane = self
             .panes
             .get_mut(self.focused_pane)
             .expect("focused pane does not exist");
         debug_assert!(self.visible_panes.contains(&pane.id()), "focused pane not visible");
         pane
+    }
+
+    fn close_focused_pane(&mut self) {
+        let pane_id = self.visible_panes.pop();
+        debug_assert_eq!(pane_id, Some(self.focused_pane));
+        self.commands.reset();
+        self.restore_focus_to_last_pane();
+    }
+
+    fn focus_pane(&mut self, pane_id: PaneId) {
+        if let Some(idx) = self.visible_panes.iter().position(|id| *id == pane_id) {
+            self.visible_panes.remove(idx);
+        }
+        self.visible_panes.push(pane_id);
+        self.focused_pane = pane_id;
+    }
+
+    fn restore_focus_to_last_pane(&mut self) {
+        let last_pane = self.visible_panes.last().expect("visible panes is empty");
+        self.focused_pane = *last_pane;
+    }
+
+    #[tracing::instrument(skip(ev, self))]
+    fn process_event(&mut self, ev: Event) -> Option<Command> {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        match ev {
+            Event::FocusGained => todo!(),
+            Event::FocusLost => todo!(),
+            Event::Paste(_) => todo!(),
+            Event::Mouse(_) => todo!(),
+            Event::Resize(_, _) => None,
+            Event::Key(key) => {
+                let command = match key.code {
+                    KeyCode::Char(c) => {
+                        if c == 'c' && key.modifiers.contains(KeyModifiers::CONTROL) {
+                            Some(Command::Quit)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+
+                command.or_else(|| {
+                    let focused_pane = self
+                        .panes
+                        .get_mut(self.focused_pane)
+                        .expect("focused pane does not exist");
+
+                    let command = match focused_pane {
+                        Pane::Commands(_, mode) => {
+                            let command = self
+                                .commands
+                                .process_key(key)
+                                .map(|cmd| Command::Commands(cmd));
+                            let command = command.or_else(|| match mode {
+                                commands::Mode::Command => match key.code {
+                                    KeyCode::Esc => {
+                                        Some(Command::Commands(commands::Command::Close))
+                                    }
+                                    _ => None,
+                                },
+                            });
+                            command
+                        }
+                        Pane::Editor(_, mode, editor_id) => {
+                            let editor = &mut self.editors[*editor_id];
+                            let buffer = &mut self.buffers[editor.buffer_id];
+                            let command = editor
+                                .process_key(key, buffer)
+                                .map(|cmd| Command::Editor(*editor_id, cmd));
+                            let command = command.or_else(|| match mode {
+                                editor::Mode::Normal => match key.code {
+                                    KeyCode::Char(':') => {
+                                        Some(Command::Commands(commands::Command::Open))
+                                    }
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                            command
+                        }
+                    };
+                    command
+                })
+            }
+        }
     }
 }
 
@@ -130,7 +227,8 @@ impl App {
 
             let mut commands = Commands::new(self.cmd_tx.clone());
             commands.register("quit", vec![], Command::Quit);
-            commands.search();
+            register_editor_commands(&mut commands);
+            commands.reset();
 
             let (focused_pane, visible_panes) = {
                 let editor_id: EditorId = editors.insert_with_key(|k| {
@@ -181,10 +279,16 @@ impl App {
                 }
             })?;
 
+            use crossterm::QueueableCommand;
+            use std::io::Write;
+
             let (cursor, cursor_style) = cursor.expect("cursor must be set");
-            execute!(term.backend_mut(), cursor::MoveTo(cursor.x, cursor.y))?;
-            execute!(term.backend_mut(), cursor::Show)?;
-            execute!(term.backend_mut(), cursor_style)?;
+            let backend = term.backend_mut();
+            backend
+                .queue(cursor_style)?
+                .queue(cursor::MoveTo(cursor.x, cursor.y))?
+                .queue(cursor::Show)?
+                .flush()?;
 
             let mut maybe_command = tokio::select! {
                 maybe_command = self.cmd_rx.recv() => { maybe_command }
@@ -197,7 +301,7 @@ impl App {
                 maybe_event = events.next().fuse() => {
                     match maybe_event {
                         Some(event) => {
-                            process_event(&mut state, event?)
+                            state.process_event(event?)
                         },
                         None => break 'main,
                     }
@@ -210,23 +314,43 @@ impl App {
                     Command::Commands(cmd) => match cmd {
                         commands::Command::Select(entry_id) => {
                             let entry = state.commands.entries.get(entry_id).unwrap();
-                            maybe_command = Some(entry.send.clone());
+                            maybe_command = Some(entry.command.clone());
+                            state.close_focused_pane();
                         }
                         commands::Command::Open => {
-                            state.visible_panes.push(commands_pane_id);
-                            state.focused_pane = commands_pane_id;
+                            state.focus_pane(commands_pane_id);
                         }
                         commands::Command::Close => {
-                            let pane_id = state.visible_panes.pop();
-                            debug_assert_eq!(pane_id, Some(commands_pane_id));
-                            state.commands.reset();
-                            state.focused_pane = state
-                                .visible_panes
-                                .last()
-                                .copied()
-                                .expect("no panes visible");
+                            debug_assert_eq!(state.focused_pane, commands_pane_id);
+                            state.close_focused_pane();
                         }
                     },
+                    Command::FocusedEditor(cmd) => {
+                        let pane_id = match state.focused_pane() {
+                            Pane::Commands(_, _) => {
+                                if let [.., pane_id, _] = state.visible_panes[..] {
+                                    match state.panes[pane_id] {
+                                        Pane::Editor(..) => pane_id,
+                                        _ => unreachable!("no focused editor"),
+                                    }
+                                } else {
+                                    unreachable!("no visible panes")
+                                }
+                            }
+                            Pane::Editor(..) => state.focused_pane,
+                        };
+                        let pane = &state.panes[pane_id];
+                        match pane {
+                            Pane::Commands(_, _) => {
+                                unreachable!("focused pane is not an editor")
+                            }
+                            Pane::Editor(_, _, editor_id) => {
+                                let editor = &mut state.editors[*editor_id];
+                                let buffer = &mut state.buffers[editor.buffer_id];
+                                editor.command(buffer, cmd);
+                            }
+                        }
+                    }
                     Command::Editor(editor_id, cmd) => {
                         let editor = &mut state.editors[editor_id];
                         let buffer = &mut state.buffers[editor.buffer_id];
@@ -266,6 +390,33 @@ impl App {
     }
 }
 
+fn register_editor_commands(commands: &mut Commands<Command>) {
+    use editor::EditorCommand::*;
+    use editor::{CursorJump, Direction};
+
+    let cmds = [
+        ("cursor.moveUp", vec![], CursorMove(Direction::Up)),
+        ("cursor.moveDown", vec![], CursorMove(Direction::Down)),
+        ("cursor.moveLeft", vec![], CursorMove(Direction::Left)),
+        ("cursor.moveRight", vec![], CursorMove(Direction::Right)),
+        ("cursor.jumpForwardWordEnd", vec![], CursorJump(CursorJump::ForwardWordEnd)),
+        (
+            "cursor.jumpForwardNextWordStart",
+            vec![],
+            CursorJump(CursorJump::ForwardNextWordStart),
+        ),
+        ("cursor.jumpBackWordStart", vec![], CursorJump(CursorJump::BackwardWordStart)),
+        (
+            "cursor.jumpBackPreviousWordEnd",
+            vec![],
+            CursorJump(CursorJump::BackwardPrevWordEnd),
+        ),
+    ];
+    for (name, aliases, cmd) in cmds {
+        commands.register(name, aliases, Command::FocusedEditor(cmd));
+    }
+}
+
 #[tracing::instrument(skip(alloc))]
 async fn file_open(alloc: &mut SlabAllocator, path: &std::path::PathBuf) -> Result<BufferContents> {
     Buffer::read(alloc, path).await
@@ -277,71 +428,5 @@ fn process_syntax(ev: syntax::Event) -> Option<Command> {
             Some(Command::Buffer(buffer_id, editor::BufferCommand::Highlight(hls)))
         }
         _ => None,
-    }
-}
-
-#[tracing::instrument(skip(ev, state))]
-fn process_event(state: &mut State, ev: Event) -> Option<Command> {
-    use crossterm::event::{KeyCode, KeyModifiers};
-
-    match ev {
-        Event::FocusGained => todo!(),
-        Event::FocusLost => todo!(),
-        Event::Paste(_) => todo!(),
-        Event::Mouse(_) => todo!(),
-        Event::Resize(_, _) => None,
-        Event::Key(key) => {
-            let command = match key.code {
-                KeyCode::Char(c) => {
-                    if c == 'c' && key.modifiers.contains(KeyModifiers::CONTROL) {
-                        Some(Command::Quit)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            };
-
-            command.or_else(|| {
-                let focused_pane = state
-                    .panes
-                    .get_mut(state.focused_pane)
-                    .expect("focused pane does not exist");
-
-                let command = match focused_pane {
-                    Pane::Commands(_, mode) => {
-                        let command = state
-                            .commands
-                            .process_key(key)
-                            .map(|cmd| Command::Commands(cmd));
-                        let command = command.or_else(|| match mode {
-                            commands::Mode::Command => match key.code {
-                                KeyCode::Esc => Some(Command::Commands(commands::Command::Close)),
-                                _ => None,
-                            },
-                        });
-                        command
-                    }
-                    Pane::Editor(_, mode, editor_id) => {
-                        let editor = &mut state.editors[*editor_id];
-                        let buffer = &mut state.buffers[editor.buffer_id];
-                        let command = editor
-                            .process_key(key, buffer)
-                            .map(|cmd| Command::Editor(*editor_id, cmd));
-                        let command = command.or_else(|| match mode {
-                            editor::Mode::Normal => match key.code {
-                                KeyCode::Char(':') => {
-                                    Some(Command::Commands(commands::Command::Open))
-                                }
-                                _ => None,
-                            },
-                            _ => None,
-                        });
-                        command
-                    }
-                };
-                command
-            })
-        }
     }
 }

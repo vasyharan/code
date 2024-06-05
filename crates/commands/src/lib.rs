@@ -32,9 +32,9 @@ bitflags! {
 #[derive(Debug)]
 pub struct Entry<T> {
     pub id: EntryId,
-    pub command: String,
+    pub name: String,
     pub aliases: Vec<String>,
-    pub send: T,
+    pub command: T,
 }
 
 #[derive(Debug)]
@@ -84,7 +84,7 @@ impl<T> Commands<T> {
         let command = command.to_string();
         let aliases = aliases.iter().map(|s| s.to_string()).collect();
         self.entries
-            .insert_with_key(|id| Entry { id, command, aliases, send: msg })
+            .insert_with_key(|id| Entry { id, name: command, aliases, command: msg })
     }
 
     pub fn process_key(&mut self, key: KeyEvent) -> Option<Command> {
@@ -138,7 +138,7 @@ impl<T> Commands<T> {
         } else {
             let matcher = SkimMatcherV2::default();
             for (id, entry) in &self.entries {
-                let result = matcher.fuzzy_indices(&entry.command, &self.query);
+                let result = matcher.fuzzy_indices(&entry.name, &self.query);
                 if let Some((score, indices)) = result {
                     results.push(SearchResult { entry: id, score, indices });
                 }

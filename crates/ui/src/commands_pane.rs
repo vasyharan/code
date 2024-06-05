@@ -125,7 +125,7 @@ impl<'a, T> CommandsPane<'a, T> {
 
                 let content = result
                     .as_ref()
-                    .map(|r| format!("{}{}", content_prefix, r.entry.command))
+                    .map(|r| format!("{}{}", content_prefix, r.entry.name))
                     .unwrap_or("".to_string());
                 let mut indices = result
                     .map(|r| r.indices)
