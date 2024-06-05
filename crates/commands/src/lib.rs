@@ -1,5 +1,5 @@
 use bitflags::bitflags;
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, KeyModifiers};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use slotmap::{new_key_type, SlotMap};
@@ -94,15 +94,24 @@ impl<T> Commands<T> {
             KeyCode::Backspace => {
                 self.query.pop();
                 self.cursor.move_prev_column();
+                self.search();
             }
             KeyCode::Char(c) => {
-                self.query.push(c);
-                self.cursor.move_next_column();
+                if c == 'p' && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.select_up();
+                } else if c == 'n' && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.select_down();
+                } else {
+                    self.query.push(c);
+                    self.cursor.move_next_column();
+                    self.search();
+                }
             }
+            KeyCode::Up => self.select_up(),
+            KeyCode::Down => self.select_down(),
             KeyCode::Enter => return Some(Command::Select(self.selected?)),
             _ => {}
         }
-        self.search();
         None
     }
 
@@ -148,5 +157,31 @@ impl<T> Commands<T> {
 
         self.selected = results.first().map(|r| r.entry);
         self.filtered = results;
+    }
+
+    fn select_up(&mut self) -> () {
+        let idx = self
+            .filtered
+            .iter()
+            .enumerate()
+            .find(|(_, r)| Some(r.entry) == self.selected)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        if idx > 0 {
+            self.selected = self.filtered.get(idx - 1).map(|r| r.entry);
+        }
+    }
+
+    fn select_down(&mut self) -> () {
+        let idx = self
+            .filtered
+            .iter()
+            .enumerate()
+            .find(|(_, r)| Some(r.entry) == self.selected)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        if idx + 1 < self.filtered.len() {
+            self.selected = self.filtered.get(idx + 1).map(|r| r.entry);
+        }
     }
 }
