@@ -99,7 +99,7 @@ impl State {
     fn close_focused_pane(&mut self) {
         let pane_id = self.visible_panes.pop();
         debug_assert_eq!(pane_id, Some(self.focused_pane));
-        self.commands.reset();
+        self.commands.query_reset();
         self.restore_focus_to_last_pane();
     }
 
@@ -228,7 +228,7 @@ impl App {
             let mut commands = Commands::new(self.cmd_tx.clone());
             commands.register("quit", vec![], Command::Quit);
             register_editor_commands(&mut commands);
-            commands.reset();
+            commands.query_reset();
 
             let (focused_pane, visible_panes) = {
                 let editor_id: EditorId = editors.insert_with_key(|k| {

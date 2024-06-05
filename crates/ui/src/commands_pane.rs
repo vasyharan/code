@@ -154,7 +154,7 @@ impl<'a, T> CommandsPane<'a, T> {
 
     #[tracing::instrument(skip(self, buf))]
     pub fn render(self, dims: tui::Rect, buf: &mut tui::Buffer) -> CursorPoint {
-        let results = self.commands.results();
+        let results = self.commands.query_results();
         let (qborder, qcontent, rcontent) = Self::layout_command_pane(dims, results.len());
         self.render_border(buf, qborder);
         self.render_query(buf, qcontent);

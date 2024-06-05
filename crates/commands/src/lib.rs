@@ -1,3 +1,7 @@
+#![feature(slice_range)]
+
+use std::ops::{Range, RangeBounds};
+
 use bitflags::bitflags;
 use crossterm::event::{KeyEvent, KeyModifiers};
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -91,10 +95,17 @@ impl<T> Commands<T> {
         use crossterm::event::KeyCode;
 
         match key.code {
+            KeyCode::Up => {
+                self.select_up();
+                None
+            }
+            KeyCode::Down => {
+                self.select_down();
+                None
+            }
             KeyCode::Backspace => {
-                self.query.pop();
-                self.cursor.move_prev_column();
-                self.search();
+                self.query_delete(self.cursor.column - 1..self.cursor.column);
+                None
             }
             KeyCode::Char(c) => {
                 if c == 'p' && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -102,28 +113,24 @@ impl<T> Commands<T> {
                 } else if c == 'n' && key.modifiers.contains(KeyModifiers::CONTROL) {
                     self.select_down();
                 } else {
-                    self.query.push(c);
-                    self.cursor.move_next_column();
-                    self.search();
+                    self.query_insert(self.cursor.column, c);
                 }
+                None
             }
-            KeyCode::Up => self.select_up(),
-            KeyCode::Down => self.select_down(),
-            KeyCode::Enter => return Some(Command::Select(self.selected?)),
-            _ => {}
+            KeyCode::Enter => Some(Command::Select(self.selected?)),
+            _ => None,
         }
-        None
     }
 
-    pub fn reset(&mut self) {
+    pub fn query_reset(&mut self) {
         self.query = String::new();
         self.cursor = Point::default();
         self.selected = None;
         self.filtered.clear();
-        self.search();
+        self.query_filter();
     }
 
-    pub fn results(&self) -> Vec<ResultEntry<T>> {
+    pub fn query_results(&self) -> Vec<ResultEntry<T>> {
         self.filtered
             .iter()
             .map(|SearchResult { entry, score, indices }| ResultEntry {
@@ -134,8 +141,31 @@ impl<T> Commands<T> {
             .collect()
     }
 
+    fn query_delete(&mut self, range: impl RangeBounds<usize>) {
+        let range = std::slice::range(range, ..self.query.len());
+        let len = range.len();
+        self.query.drain(range);
+        if len > self.cursor.column {
+            self.cursor.column = 0;
+        } else {
+            self.cursor.column -= len;
+        }
+
+        self.query_filter();
+    }
+
+    fn query_insert(&mut self, offset: usize, c: char) {
+        if offset == self.query.len() {
+            self.query.push(c);
+        } else {
+            self.query.insert(offset, c);
+        }
+        self.cursor.move_next_column();
+        self.query_filter();
+    }
+
     #[tracing::instrument(skip(self))]
-    pub fn search(&mut self) {
+    fn query_filter(&mut self) {
         let mut results = vec![];
         if self.query.is_empty() {
             for (id, _) in &self.entries {
