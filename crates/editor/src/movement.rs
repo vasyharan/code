@@ -122,8 +122,7 @@ impl Editor {
     }
 
     pub fn cursor_jump_end_of_nearest_word(&mut self, buffer: &Buffer) {
-        let line_offset = buffer.contents.line_to_char(self.cursor.line);
-        let mut offset = line_offset + self.cursor.column + 1;
+        let mut offset = buffer.contents.point_to_offset(self.cursor);
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum State {
@@ -134,6 +133,7 @@ impl Editor {
             Done,
         }
 
+        offset += 1;
         let mut state = State::Init;
         let mut chars = buffer.contents.chars_at(offset);
         loop {
@@ -179,14 +179,11 @@ impl Editor {
             }
         }
 
-        let line = buffer.contents.char_to_line(offset);
-        let column = offset - buffer.contents.line_to_char(line);
-        self.cursor = Point { line, column };
+        self.cursor = buffer.contents.offset_to_point(offset);
     }
 
     pub fn cursor_jump_start_of_next_word(&mut self, buffer: &Buffer) {
-        let line_offset = buffer.contents.line_to_char(self.cursor.line);
-        let mut offset = line_offset + self.cursor.column;
+        let mut offset = buffer.contents.point_to_offset(self.cursor);
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum State {
@@ -251,9 +248,7 @@ impl Editor {
             }
         }
 
-        let line = buffer.contents.char_to_line(offset);
-        let column = offset - buffer.contents.line_to_char(line);
-        self.cursor = Point { line, column };
+        self.cursor = buffer.contents.offset_to_point(offset);
     }
 }
 

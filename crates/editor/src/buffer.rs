@@ -3,7 +3,7 @@ use rope::{Rope, RopeBuilder};
 use slotmap::new_key_type;
 use std::ops::Deref;
 use std::path::PathBuf;
-use tokio::io::AsyncReadExt;
+use tore::Point;
 
 pub type Highlights = iset::IntervalMap<usize, String>;
 
@@ -103,6 +103,19 @@ impl Buffer {
 
 #[derive(Debug, Clone)]
 pub struct Contents(Rope);
+
+impl Contents {
+    pub(crate) fn point_to_offset(&self, cursor: Point) -> usize {
+        let line_offset = self.0.line_to_char(cursor.line);
+        line_offset + cursor.column
+    }
+
+    pub(crate) fn offset_to_point(&self, offset: usize) -> Point {
+        let line = self.0.char_to_line(offset);
+        let column = offset - self.0.line_to_char(line);
+        Point { line, column }
+    }
+}
 
 impl Deref for Contents {
     type Target = Rope;
