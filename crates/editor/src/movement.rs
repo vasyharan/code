@@ -54,9 +54,66 @@ impl Editor {
         self.cursor.column = 0;
     }
 
-    pub fn cursor_jump_start_of_nearest_word(&mut self, _buffer: &Buffer) {
-        // b
-        todo!()
+    pub fn cursor_jump_start_of_nearest_word(&mut self, buffer: &Buffer) {
+        let line_offset = buffer.contents.line_to_char(self.cursor.line);
+        let mut offset = line_offset + self.cursor.column;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum State {
+            Init,
+            SkipWord,
+            SkipPunctuation,
+            SkipWhitespace,
+            Done,
+        }
+
+        let mut state = State::Init;
+        let mut chars = buffer.contents.chars_at(offset);
+        loop {
+            match state {
+                State::Done => break,
+                _ => match chars.prev() {
+                    None => break,
+                    Some(char) => {
+                        offset -= 1;
+                        match state {
+                            State::Done => unreachable!("invalid state"),
+                            State::Init | State::SkipWhitespace => {
+                                if char.is_alphanumeric() {
+                                    state = State::SkipWord;
+                                } else if char.is_ascii_punctuation() {
+                                    state = State::SkipPunctuation;
+                                } else if is_whitespace(char) {
+                                    state = State::SkipWhitespace;
+                                } else {
+                                    state = State::Done;
+                                }
+                            }
+                            State::SkipWord => {
+                                if char.is_alphanumeric() {
+                                    state = State::SkipWord;
+                                } else {
+                                    offset += 1;
+                                    state = State::Done;
+                                }
+                            }
+                            State::SkipPunctuation => {
+                                if char.is_ascii_punctuation() {
+                                    state = State::SkipPunctuation;
+                                } else {
+                                    offset += 1;
+                                    state = State::Done;
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        }
+
+        let line = buffer.contents.char_to_line(offset);
+        let column = offset - buffer.contents.line_to_char(line);
+        self.cursor = Point { line, column };
     }
 
     pub fn cursor_jump_start_of_last_word(&mut self, _buffer: &Buffer) {
@@ -66,11 +123,7 @@ impl Editor {
 
     pub fn cursor_jump_end_of_nearest_word(&mut self, buffer: &Buffer) {
         let line_offset = buffer.contents.line_to_char(self.cursor.line);
-        let mut offset = line_offset + self.cursor.column;
-        // let offset = buffer
-        //     .contents
-        //     .point_to_offset(self.cursor)
-        //     .expect("editor cursor should be a valid point");
+        let mut offset = line_offset + self.cursor.column + 1;
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum State {
@@ -83,31 +136,24 @@ impl Editor {
 
         let mut state = State::Init;
         let mut chars = buffer.contents.chars_at(offset);
-        offset += 1;
-        _ = chars.next();
-        let chars = loop {
+        loop {
             match state {
-                State::Done => break chars,
-                _ => {
-                    offset += 1;
-                    match chars.next() {
-                        None => break chars,
-                        Some(char) => match state {
+                State::Done => break,
+                _ => match chars.next() {
+                    None => break,
+                    Some(char) => {
+                        offset += 1;
+                        match state {
                             State::Done => unreachable!("invalid state"),
                             State::Init | State::SkipWhitespace => {
                                 if char.is_alphanumeric() {
                                     state = State::SkipWord;
                                 } else if char.is_ascii_punctuation() {
                                     state = State::SkipPunctuation;
-                                } else if char == ' '
-                                    || char == '\t'
-                                    || char == '\r'
-                                    || char == '\n'
-                                {
+                                } else if is_whitespace(char) {
                                     state = State::SkipWhitespace;
                                 } else {
                                     offset -= 1;
-                                    // chars.prev();
                                     state = State::Done;
                                 }
                             }
@@ -116,8 +162,6 @@ impl Editor {
                                     state = State::SkipWord;
                                 } else {
                                     offset -= 2;
-                                    // chars.prev();
-                                    // chars.prev();
                                     state = State::Done;
                                 }
                             }
@@ -126,22 +170,14 @@ impl Editor {
                                     state = State::SkipPunctuation;
                                 } else {
                                     offset -= 2;
-                                    // chars.prev();
-                                    // chars.prev();
                                     state = State::Done;
                                 }
                             }
-                        },
+                        }
                     }
-                }
+                },
             }
-        };
-
-        // let offset = chars.offset();
-        // self.cursor = buffer
-        //     .contents
-        //     .offset_to_point(offset)
-        //     .expect("invalid offset");
+        }
 
         let line = buffer.contents.char_to_line(offset);
         let column = offset - buffer.contents.line_to_char(line);
@@ -151,10 +187,6 @@ impl Editor {
     pub fn cursor_jump_start_of_next_word(&mut self, buffer: &Buffer) {
         let line_offset = buffer.contents.line_to_char(self.cursor.line);
         let mut offset = line_offset + self.cursor.column;
-        // let offset = buffer
-        //     .contents
-        //     .point_to_offset(self.cursor)
-        //     .expect("editor cursor should be a valid point");
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum State {
@@ -167,25 +199,21 @@ impl Editor {
 
         let mut chars = buffer.contents.chars_at(offset);
         let mut state = State::Init;
-        let chars = loop {
+        loop {
             match state {
-                State::Done => break chars,
-                _ => {
-                    offset += 1;
-                    match chars.next() {
-                        None => break chars,
-                        Some(char) => match state {
+                State::Done => break,
+                _ => match chars.next() {
+                    None => break,
+                    Some(char) => {
+                        offset += 1;
+                        match state {
                             State::Done => unreachable!("invalid state"),
                             State::Init => {
                                 if char.is_alphanumeric() {
                                     state = State::SkipWord;
                                 } else if char.is_ascii_punctuation() {
                                     state = State::SkipPunctuation;
-                                } else if char == ' '
-                                    || char == '\t'
-                                    || char == '\r'
-                                    || char == '\n'
-                                {
+                                } else if is_whitespace(char) {
                                     state = State::SkipWhitespace;
                                 } else {
                                     state = State::Done;
@@ -195,7 +223,6 @@ impl Editor {
                                 if char == ' ' || char == '\t' || char == '\r' || char == '\n' {
                                     state = State::SkipWhitespace;
                                 } else {
-                                    // chars.prev();
                                     offset -= 1;
                                     state = State::Done;
                                 }
@@ -210,7 +237,7 @@ impl Editor {
                                 }
                             }
                             State::SkipPunctuation => {
-                                if char.is_alphanumeric() {
+                                if char.is_ascii_punctuation() {
                                     state = State::SkipPunctuation;
                                 } else {
                                     chars.prev();
@@ -218,19 +245,18 @@ impl Editor {
                                     state = State::SkipWhitespace;
                                 }
                             }
-                        },
+                        }
                     }
-                }
+                },
             }
-        };
+        }
 
-        // let offset = chars.offset();
-        // self.cursor = buffer
-        //     .contents
-        //     .offset_to_point(offset)
-        //     .expect("invalid offset");
         let line = buffer.contents.char_to_line(offset);
         let column = offset - buffer.contents.line_to_char(line);
         self.cursor = Point { line, column };
     }
+}
+
+fn is_whitespace(char: char) -> bool {
+    char == ' ' || char == '\t' || char == '\r' || char == '\n'
 }

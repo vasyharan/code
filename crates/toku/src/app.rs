@@ -1,7 +1,6 @@
 use anyhow::Result;
 use crossterm::cursor::{self, SetCursorStyle};
 use crossterm::event::Event;
-use rope::Rope;
 use slotmap::{new_key_type, SlotMap};
 use tokio::sync::mpsc;
 
