@@ -1,12 +1,12 @@
 use anyhow::Result;
 use crossterm::cursor::{self, SetCursorStyle};
 use crossterm::event::Event;
+use rope::Rope;
 use slotmap::{new_key_type, SlotMap};
 use tokio::sync::mpsc;
 
 use commands::Commands;
 use editor::{Buffer, BufferContents, BufferId, Editor, EditorId};
-use rope::SlabAllocator;
 use tore::CursorPoint;
 
 type BufferMap = SlotMap<BufferId, Buffer>;
@@ -206,7 +206,6 @@ impl App {
         let mut syntax = syntax::Client::spawn();
 
         let theme = ui::Theme::default();
-        let mut alloc = rope::SlabAllocator::new();
         let mut state: State = {
             let mut buffers = BufferMap::with_key();
             let mut editors = EditorMap::with_key();
@@ -348,7 +347,7 @@ impl App {
                         buffer.command(cmd);
                     }
                     Command::FileOpen(maybe_editor_id, path) => {
-                        let contents = file_open(&mut alloc, &path).await?;
+                        let contents = file_open(&path).await?;
                         let buffer_id = state
                             .buffers
                             .insert_with_key(|k| Buffer::new(k, contents.clone()));
@@ -396,9 +395,9 @@ fn register_editor_commands(commands: &mut Commands<Command>) {
     }
 }
 
-#[tracing::instrument(skip(alloc))]
-async fn file_open(alloc: &mut SlabAllocator, path: &std::path::PathBuf) -> Result<BufferContents> {
-    Buffer::read(alloc, path).await
+#[tracing::instrument(skip())]
+async fn file_open(path: &std::path::PathBuf) -> Result<BufferContents> {
+    Buffer::read(path).await
 }
 
 fn process_syntax(ev: syntax::Event) -> Option<Command> {

@@ -41,35 +41,28 @@ impl<'a> EditorPane<'a> {
         use bstr::ByteSlice;
 
         let offset = self.screen_offset(dims);
-        let mut lines = self
-            .buffer
-            .contents
-            .lines(offset.line..(offset.line + dims.height as usize));
+        let mut lines = self.buffer.contents.lines_at(offset.line);
         let x = dims.left();
-        for y in dims.top()..dims.bottom() {
+        for (yoffset, y) in (dims.top()..dims.bottom()).enumerate() {
             if let Some(line) = lines.next() {
-                let chunk_and_ranges = line.chunk_and_ranges(0);
+                let line_offset = self.buffer.contents.line_to_byte(offset.line + yoffset);
                 let mut xoffset = 0;
-                'row_loop: for (chunk, chunk_range) in chunk_and_ranges {
-                    let mut byte_offset = chunk_range.start;
-                    for c in chunk.chars() {
-                        let x = x + xoffset;
-                        if x >= dims.width {
+                'row_loop: for chunk in line.chunks() {
+                    for (start, end, grapheme) in chunk.as_bytes().as_bstr().grapheme_indices() {
+                        if x + xoffset >= dims.width || grapheme == "\n" {
                             break 'row_loop;
                         }
-                        let char_len = c.len_utf8();
-                        let char_range = byte_offset..(byte_offset + char_len);
-                        let cell = buf.get_mut(x, y);
-                        // cell.set_bg(self.theme.bg().0);
+
+                        let cell = buf.get_mut(x + xoffset, y);
+                        let char_range = line_offset + start..line_offset + end;
                         if let Some((_, name)) = self.buffer.highlights.iter(char_range).next() {
                             if let Some(color) = self.theme.scheme(name) {
                                 cell.set_fg(color.0);
                             }
                         }
-                        cell.set_char(c);
 
-                        xoffset += 1; // TODO: this should check wcwidth
-                        byte_offset += char_len;
+                        cell.set_symbol(grapheme);
+                        xoffset += 1;
                     }
                 }
             } else {

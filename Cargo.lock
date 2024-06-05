@@ -143,12 +143,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bytecount"
-version = "0.6.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1e5f035d16fc623ae5f74981db80a439803888314e3a555fd6f04acd51a3205"
-
-[[package]]
 name = "bytes"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -171,12 +165,6 @@ name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
-
-[[package]]
-name = "circular-buffer"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da987586004ae7c43b7df5e3f7693775068522e1086f8d9b2d74c778a0f43313"
 
 [[package]]
 name = "clap"
@@ -271,7 +259,7 @@ dependencies = [
  "commands",
  "crossterm",
  "iset",
- "rope",
+ "ropey",
  "slotmap",
  "tokio",
  "tokio-stream",
@@ -683,17 +671,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adad44e29e4c806119491a7f06f03de4d1af22c3a680dd47f1e6e179439d1f56"
 
 [[package]]
-name = "rope"
-version = "0.1.0"
+name = "ropey"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93411e420bcd1a75ddd1dc3caf18c23155eda2c090631a85af21ba19e97093b5"
 dependencies = [
- "anyhow",
- "bstr",
- "bytecount",
- "circular-buffer",
- "memchr",
- "sumtree",
- "tokio",
- "tore",
+ "smallvec",
+ "str_indices",
 ]
 
 [[package]]
@@ -798,6 +782,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
+name = "str_indices"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9557cb6521e8d009c51a8666f09356f4b817ba9ba0981a305bd86aee47bd35c"
+
+[[package]]
 name = "strsim"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -826,10 +816,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sumtree"
-version = "0.1.0"
-
-[[package]]
 name = "syn"
 version = "2.0.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -848,7 +834,7 @@ dependencies = [
  "editor",
  "futures",
  "iset",
- "rope",
+ "ropey",
  "tokio",
  "tracing",
  "tree-sitter",
@@ -913,7 +899,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "ratatui",
- "rope",
+ "ropey",
  "slotmap",
  "syntax",
  "tokio",

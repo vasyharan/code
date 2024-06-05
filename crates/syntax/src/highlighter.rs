@@ -17,7 +17,8 @@ pub fn highlight(
     for (query_match, _) in captures {
         for capture in query_match.captures {
             let capture_name = &query.capture_names()[capture.index as usize];
-            highlights.insert(capture.node.byte_range(), capture_name.clone());
+            let capture_range = capture.node.byte_range();
+            highlights.insert(capture_range, capture_name.clone());
         }
     }
     highlights

@@ -4,8 +4,8 @@ members = [
     "crates/commands",
     "crates/core",
     "crates/editor",
-    "crates/rope",
-    "crates/sumtree",
+    # "crates/rope",
+    # "crates/sumtree",
     "crates/syntax",
     "crates/toku",
     "crates/ui",
@@ -14,8 +14,9 @@ members = [
 [workspace.dependencies]
 commands = { path = "./crates/commands" }
 editor = { path = "./crates/editor" }
-rope = { path = "./crates/rope" }
-sumtree = { path = "./crates/sumtree" }
+rope = { package = "ropey", version = "1.6" }
+# rope = { path = "./crates/rope" }
+# sumtree = { path = "./crates/sumtree" }
 syntax = { path = "./crates/syntax" }
 tore = { path = "./crates/core" }
 ui = { path = "./crates/ui" }
