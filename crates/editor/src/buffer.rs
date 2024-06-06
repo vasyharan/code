@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rope::{Rope, RopeBuilder};
 use slotmap::new_key_type;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use tore::Point;
 
@@ -105,12 +105,12 @@ impl Buffer {
 pub struct Contents(Rope);
 
 impl Contents {
-    pub(crate) fn point_to_offset(&self, cursor: Point) -> usize {
+    pub(crate) fn point_to_char_offset(&self, cursor: Point) -> usize {
         let line_offset = self.0.line_to_char(cursor.line);
         line_offset + cursor.column
     }
 
-    pub(crate) fn offset_to_point(&self, offset: usize) -> Point {
+    pub(crate) fn char_offset_to_point(&self, offset: usize) -> Point {
         let line = self.0.char_to_line(offset);
         let column = offset - self.0.line_to_char(line);
         Point { line, column }
@@ -122,5 +122,11 @@ impl Deref for Contents {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for Contents {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }

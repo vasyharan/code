@@ -16,4 +16,5 @@ commands.workspace = true
 
 bstr.workspace = true
 ratatui.workspace = true
+crossterm.workspace = true
 tracing.workspace = true

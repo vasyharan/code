@@ -1,4 +1,5 @@
-use bstr::*;
+use bstr::ByteSlice;
+use crossterm::cursor::SetCursorStyle;
 use ratatui::prelude as tui;
 
 use commands::Commands;
@@ -153,14 +154,15 @@ impl<'a, T> CommandsPane<'a, T> {
     }
 
     #[tracing::instrument(skip(self, buf))]
-    pub fn render(self, dims: tui::Rect, buf: &mut tui::Buffer) -> CursorPoint {
+    pub fn render(self, dims: tui::Rect, buf: &mut tui::Buffer) -> (CursorPoint, SetCursorStyle) {
         let results = self.commands.query_results();
         let (qborder, qcontent, rcontent) = Self::layout_command_pane(dims, results.len());
         self.render_border(buf, qborder);
         self.render_query(buf, qcontent);
         self.render_results(buf, rcontent, results);
 
-        self.offset_cursor(self.commands.cursor, qcontent)
+        let cursor_pos = self.offset_cursor(self.commands.cursor, qcontent);
+        (cursor_pos, SetCursorStyle::BlinkingBar)
     }
 }
 

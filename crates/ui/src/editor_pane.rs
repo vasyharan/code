@@ -1,3 +1,4 @@
+use crossterm::cursor::SetCursorStyle;
 use editor::{Buffer, Editor};
 use ratatui::prelude as tui;
 use tore::CursorPoint;
@@ -37,7 +38,7 @@ impl<'a> EditorPane<'a> {
     }
 
     #[tracing::instrument(skip(self, buf))]
-    pub fn render(self, dims: tui::Rect, buf: &mut tui::Buffer) -> CursorPoint {
+    pub fn render(self, dims: tui::Rect, buf: &mut tui::Buffer) -> (CursorPoint, SetCursorStyle) {
         use bstr::ByteSlice;
 
         let offset = self.screen_offset(dims);
@@ -70,6 +71,11 @@ impl<'a> EditorPane<'a> {
             }
         }
 
-        self.offset_cursor(dims, self.editor.cursor)
+        let cursor_pos = self.offset_cursor(dims, self.editor.cursor);
+        let cursor_style = match self.editor.mode {
+            editor::Mode::Normal => SetCursorStyle::BlinkingBlock,
+            editor::Mode::Insert => SetCursorStyle::BlinkingBar,
+        };
+        (cursor_pos, cursor_style)
     }
 }

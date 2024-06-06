@@ -245,20 +245,15 @@ impl App {
                             let widget = ui::CommandsPane::new(&theme, &state.commands);
                             let c = widget.render(area, fb);
                             (cursor.is_none() && state.focused_pane == *pane_id)
-                                .then(|| cursor = Some((c, SetCursorStyle::BlinkingBar)));
+                                .then(|| cursor = Some(c));
                         }
-                        Pane::Editor(pane_id, mode, editor_id) => {
+                        Pane::Editor(pane_id, _, editor_id) => {
                             let editor = &state.editors[*editor_id];
                             let buffer = &state.buffers[editor.buffer_id];
                             let widget = ui::EditorPane::new(&theme, buffer, editor);
                             let c = widget.render(area, fb);
-                            (cursor.is_none() && state.focused_pane == *pane_id).then(|| {
-                                let cursor_style = match mode {
-                                    editor::Mode::Normal => SetCursorStyle::BlinkingBlock,
-                                    editor::Mode::Insert => SetCursorStyle::BlinkingBar,
-                                };
-                                cursor = Some((c, cursor_style))
-                            });
+                            (cursor.is_none() && state.focused_pane == *pane_id)
+                                .then(|| cursor = Some(c));
                         }
                     }
                 }
@@ -340,6 +335,19 @@ impl App {
                         let editor = &mut state.editors[editor_id];
                         let buffer = &mut state.buffers[editor.buffer_id];
                         editor.command(buffer, cmd);
+                        let buffer = &state.buffers[editor.buffer_id];
+                        match syntax::Language::try_from(buffer) {
+                            Ok(language) => {
+                                syntax
+                                    .command(syntax::Command::Parse {
+                                        buffer_id: editor.buffer_id,
+                                        contents: buffer.contents.clone(),
+                                        language,
+                                    })
+                                    .await?;
+                            }
+                            _ => todo!(),
+                        }
                     }
                     Command::Buffer(buffer_id, cmd) => {
                         let buffer = &mut state.buffers[buffer_id];
@@ -350,6 +358,11 @@ impl App {
                         let buffer_id = state
                             .buffers
                             .insert_with_key(|k| Buffer::new(k, contents.clone()));
+
+                        let editor_id = maybe_editor_id.unwrap_or(default_editor_id);
+                        let editor = &mut state.editors[editor_id];
+                        editor.swap_buffer(buffer_id);
+
                         match syntax::Language::try_from(&state.buffers[buffer_id]) {
                             Ok(language) => {
                                 syntax
@@ -362,10 +375,6 @@ impl App {
                             }
                             _ => todo!(),
                         };
-
-                        let editor_id = maybe_editor_id.unwrap_or(default_editor_id);
-                        let editor = &mut state.editors[editor_id];
-                        editor.swap_buffer(buffer_id);
                     }
                 }
             }
