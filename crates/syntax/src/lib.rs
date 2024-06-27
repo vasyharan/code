@@ -2,7 +2,7 @@ mod client;
 mod highlighter;
 mod language;
 
-pub use client::{Client, Command, Event};
+pub use client::{Command, Event, Syntax};
 pub use language::Language;
 
 use editor::BufferContents;

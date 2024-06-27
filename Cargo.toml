@@ -1,22 +1,22 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/commands",
     "crates/core",
     "crates/editor",
     # "crates/rope",
     # "crates/sumtree",
+    "crates/selector",
     "crates/syntax",
     "crates/toku",
     "crates/ui",
 ]
 
 [workspace.dependencies]
-commands = { path = "./crates/commands" }
 editor = { path = "./crates/editor" }
 rope = { package = "ropey", version = "1.6" }
 # rope = { path = "./crates/rope" }
 # sumtree = { path = "./crates/sumtree" }
+selector = { path = "./crates/selector" }
 syntax = { path = "./crates/syntax" }
 tore = { path = "./crates/core" }
 ui = { path = "./crates/ui" }
@@ -44,3 +44,4 @@ tokio = { version = "1", default-features = false, features = [
     "tracing",
 ] }
 tracing = "0.1.40"
+tree-sitter = "0.20"

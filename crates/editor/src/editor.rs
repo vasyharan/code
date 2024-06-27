@@ -1,5 +1,6 @@
+use std::path::PathBuf;
+
 use crate::{Buffer, BufferId};
-use crossterm::event::KeyEvent;
 use slotmap::new_key_type;
 use tore::Point;
 
@@ -32,54 +33,24 @@ pub enum CursorJump {
 
 #[derive(Debug, Clone)]
 pub enum Command {
-    ModeSet(Mode),
+    SetMode(Mode),
     SwapBuffer(BufferId),
     CursorMove(Direction),
     CursorJump(CursorJump),
-    Insert(char),
+    InsertChar(char),
 }
 
 #[derive(Debug)]
 pub struct Editor {
+    pub mode: Mode,
     pub id: Id,
     pub buffer_id: BufferId,
-    pub mode: Mode,
     pub cursor: Point,
 }
 
 impl Editor {
     pub fn new(id: Id, buffer_id: BufferId) -> Self {
-        Self { id, buffer_id, mode: Default::default(), cursor: Default::default() }
-    }
-
-    pub fn process_key(&mut self, key: KeyEvent, buffer: &mut Buffer) -> Option<Command> {
-        use crossterm::event::KeyCode;
-        debug_assert!(buffer.id == self.buffer_id);
-
-        match self.mode {
-            Mode::Normal => match key.code {
-                KeyCode::Up | KeyCode::Char('k') => self.cursor_move_up(buffer),
-                KeyCode::Down | KeyCode::Char('j') => self.cursor_move_down(buffer),
-                KeyCode::Left | KeyCode::Char('h') => self.cursor_move_left(buffer),
-                KeyCode::Right | KeyCode::Char('l') => self.cursor_move_right(buffer),
-                KeyCode::Char('w') => self.cursor_jump_start_of_next_word(buffer),
-                KeyCode::Char('e') => self.cursor_jump_end_of_nearest_word(buffer),
-                KeyCode::Char('b') => self.cursor_jump_start_of_nearest_word(buffer),
-                KeyCode::Char('0') => self.cursor_jump_line_zero(buffer),
-                KeyCode::Char('i') => self.mode = Mode::Insert,
-                _ => (),
-            },
-            Mode::Insert => match key.code {
-                KeyCode::Esc => self.mode = Mode::Normal,
-                KeyCode::Up => self.cursor_move_up(buffer),
-                KeyCode::Down => self.cursor_move_down(buffer),
-                KeyCode::Left => self.cursor_move_left(buffer),
-                KeyCode::Right => self.cursor_move_right(buffer),
-                KeyCode::Char(c) => self.insert_char(buffer, c),
-                _ => (),
-            },
-        }
-        None
+        Self { id, mode: Mode::default(), buffer_id, cursor: Default::default() }
     }
 
     pub fn swap_buffer(&mut self, buffer_id: BufferId) {
@@ -90,8 +61,8 @@ impl Editor {
         debug_assert!(buffer.id == self.buffer_id);
         match command {
             Command::SwapBuffer(buffer_id) => self.swap_buffer(buffer_id),
-            Command::ModeSet(mode) => self.mode = mode,
-            Command::Insert(c) => self.insert_char(buffer, c),
+            Command::InsertChar(c) => self.insert_char(buffer, c),
+            Command::SetMode(mode) => self.mode = mode,
             Command::CursorMove(direction) => match direction {
                 Direction::Up => self.cursor_move_up(buffer),
                 Direction::Down => self.cursor_move_down(buffer),
@@ -107,7 +78,7 @@ impl Editor {
         };
     }
 
-    fn insert_char(&mut self, buffer: &mut Buffer, c: char) {
+    pub fn insert_char(&mut self, buffer: &mut Buffer, c: char) {
         let offset = buffer.contents.point_to_char_offset(self.cursor);
         self.cursor.move_next_column();
         buffer.contents.insert_char(offset, c);

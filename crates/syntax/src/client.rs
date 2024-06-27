@@ -28,54 +28,58 @@ struct Worker(thread::JoinHandle<Result<()>>);
 
 impl Worker {
     fn spawn(mut rx: mpsc::Receiver<Command>, tx: mpsc::Sender<Event>) -> Self {
-        let thread_handle = thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread().build()?;
-            rt.block_on(async {
-                let mut parser = ts::Parser::new();
+        // let thread_handle = thread::spawn(move || {
+        let thread_handle = thread::Builder::new()
+            .name(String::from("syntax"))
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread().build()?;
+                rt.block_on(async {
+                    let mut parser = ts::Parser::new();
 
-                while let Some(ev) = rx.recv().await {
-                    use Command::*;
-                    match ev {
-                        Parse { buffer_id, contents, language } => {
-                            let span = tracing::info_span!("parse_ts_tree").entered();
-                            parser.set_language(language.ts)?;
-                            let ts_text = BufferContentsTextProvider(&contents);
-                            let ts_tree = parser.parse_with(&mut ts_text.parse_callback(), None);
-                            drop(span);
-                            match ts_tree {
-                                None => todo!(),
-                                Some(tree) => {
-                                    tx.send(Event::Parsed(buffer_id, tree.clone())).await?;
-                                    let highlights =
-                                        highlighter::highlight(&contents, language, tree);
-                                    tx.send(Event::Hightlight(buffer_id, highlights)).await?;
+                    while let Some(ev) = rx.recv().await {
+                        use Command::*;
+                        match ev {
+                            Parse { buffer_id, contents, language } => {
+                                let span = tracing::info_span!("parse_ts_tree").entered();
+                                parser.set_language(language.ts)?;
+                                let ts_text = BufferContentsTextProvider(&contents);
+                                let ts_tree =
+                                    parser.parse_with(&mut ts_text.parse_callback(), None);
+                                drop(span);
+                                match ts_tree {
+                                    None => todo!(),
+                                    Some(tree) => {
+                                        tx.send(Event::Parsed(buffer_id, tree.clone())).await?;
+                                        let highlights =
+                                            highlighter::highlight(&contents, language, tree);
+                                        tx.send(Event::Hightlight(buffer_id, highlights)).await?;
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                Ok::<(), anyhow::Error>(())
-            })?;
+                    Ok::<(), anyhow::Error>(())
+                })?;
 
-            Ok(())
-        });
+                Ok(())
+            }).expect("failed to spawn syntax worker");
         Self(thread_handle)
     }
 }
 
 #[derive(Debug)]
-pub struct Client {
+pub struct Syntax {
     cmd_tx: mpsc::Sender<Command>,
     event_rx: mpsc::Receiver<Event>,
     worker: Worker,
 }
 
-impl Client {
+impl Syntax {
     pub fn spawn() -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::channel(1);
         let worker = Worker::spawn(cmd_rx, event_tx);
-        Client { cmd_tx, event_rx, worker }
+        Syntax { cmd_tx, event_rx, worker }
     }
 
     pub async fn command(&self, command: Command) -> Result<()> {
@@ -90,7 +94,7 @@ impl Client {
     }
 }
 
-impl Stream for Client {
+impl Stream for Syntax {
     type Item = Event;
 
     fn poll_next(

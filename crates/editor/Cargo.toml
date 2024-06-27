@@ -12,7 +12,6 @@ doctest = false
 [dependencies]
 rope.workspace = true
 tore.workspace = true
-commands.workspace = true
 
 anyhow.workspace = true
 crossterm.workspace = true

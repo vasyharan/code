@@ -213,19 +213,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
-name = "commands"
-version = "0.1.0"
-dependencies = [
- "bitflags 2.5.0",
- "crossterm",
- "fuzzy-matcher",
- "slotmap",
- "tokio",
- "tore",
- "tracing",
-]
-
-[[package]]
 name = "crossterm"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -256,7 +243,6 @@ name = "editor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "commands",
  "crossterm",
  "iset",
  "ropey",
@@ -699,6 +685,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "selector"
+version = "0.1.0"
+dependencies = [
+ "tore",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.198"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -892,20 +885,22 @@ name = "toku"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bstr",
  "clap",
- "commands",
  "crossterm",
  "editor",
  "futures",
  "lazy_static",
  "ratatui",
  "ropey",
+ "selector",
  "slotmap",
  "syntax",
  "tokio",
  "tore",
  "tracing",
  "tracing-subscriber",
+ "tree-sitter",
  "ui",
  "xdg",
 ]
@@ -1006,10 +1001,10 @@ name = "ui"
 version = "0.1.0"
 dependencies = [
  "bstr",
- "commands",
  "crossterm",
  "editor",
  "ratatui",
+ "selector",
  "tore",
  "tracing",
 ]

@@ -7,12 +7,13 @@ publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 editor.workspace = true
-syntax.workspace = true
 rope.workspace = true
-ui.workspace = true
+selector.workspace = true
+syntax.workspace = true
 tore.workspace = true
-commands.workspace = true
+ui.workspace = true
 
+bstr.workspace = true
 anyhow.workspace = true
 crossterm.workspace = true
 futures.workspace = true
@@ -21,6 +22,7 @@ ratatui.workspace = true
 slotmap.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+tree-sitter.workspace = true
 
 clap = { version = "4.0", features = ["derive"] }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }

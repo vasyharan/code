@@ -38,7 +38,7 @@ impl<'a> EditorPane<'a> {
     }
 
     #[tracing::instrument(skip(self, buf))]
-    pub fn render(self, dims: tui::Rect, buf: &mut tui::Buffer) -> (CursorPoint, SetCursorStyle) {
+    pub fn render(self, buf: &mut tui::Buffer, dims: tui::Rect) -> (CursorPoint, SetCursorStyle) {
         use bstr::ByteSlice;
 
         let offset = self.screen_offset(dims);
